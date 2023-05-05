@@ -1,0 +1,12 @@
+apiVersion: control.vitastor.io/v1
+kind: VitastorNode
+metadata:
+  labels:
+    app.kubernetes.io/name: vitastornode
+    app.kubernetes.io/instance: vitastornode-sample
+    app.kubernetes.io/part-of: vitastor-operator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: vitastor-operator
+  name: vitastornode-sample
+spec:
+  nodeName: "rke-node1"

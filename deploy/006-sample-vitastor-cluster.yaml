@@ -1,0 +1,13 @@
+apiVersion: control.vitastor.io/v1
+kind: VitastorCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: vitastorcluster
+    app.kubernetes.io/instance: vitastorcluster-sample
+    app.kubernetes.io/part-of: vitastor-operator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: vitastor-operator
+  name: vitastorcluster-test
+spec:
+  monitorReplicaNum: 3
+  vitastorNodeLabel: "vitastor-node"

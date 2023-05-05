@@ -1,0 +1,15 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  namespace: vitastor-system
+  name: vitastor
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: csi.vitastor.io
+volumeBindingMode: Immediate
+parameters:
+  etcdVolumePrefix: ""
+  poolId: "1"
+  etcdUrl: "http://<ETCD IP>:<ETCD PORT>"
+  etcdPrefix: "/vitastor"

@@ -1,0 +1,34 @@
+domain: vitastor.io
+layout:
+- go.kubebuilder.io/v3
+projectName: vitastor-operator
+repo: gitlab.com/Antilles7227/vitastor-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorNode
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v1
+  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorOSD
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v1
+  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorCluster
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v1
+  version: v1
+version: "3"

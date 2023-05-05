@@ -1,0 +1,206 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: serviceaccount
+    app.kuberentes.io/instance: vitastor-controller-manager
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: vitastor-operator
+    app.kubernetes.io/part-of: vitastor-operator
+  name: vitastor-controller-manager
+  namespace: vitastor-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vitastor-manager-role
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets/status
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments/status
+  verbs:
+  - get
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorclusters/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorclusters/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastornodes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastornodes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastornodes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorosds
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorosds/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorosds/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrolebinding
+    app.kubernetes.io/instance: vitastor-manager-rolebinding
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: vitastor-operator
+    app.kubernetes.io/part-of: vitastor-operator
+  name: vitastor-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vitastor-manager-role
+subjects:
+- kind: ServiceAccount
+  name: vitastor-controller-manager
+  namespace: vitastor-system
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vitastor-operator
+  namespace: vitastor-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vitastor-operator
+  template:
+    metadata:
+      labels:
+        app: vitastor-operator
+    spec:
+      containers:
+        - name: vitastor-operator
+          image: antilles/vitastor-operator:0.8.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: "CONTAINER_PORT"
+              value: "5666"
+            - name: "OSD_IMAGE"
+              value: "antilles/vitastor-osd:0.8"
+            - name: "MONITOR_IMAGE"
+              value: "antilles/vitastor-monitor:0.8.6"
+            - name: "AGENT_IMAGE"
+              value: "antilles/vitastor-agent:0.8"
+            - name: "UPDATE_INTERVAL"
+              value: "2"
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1000Mi
+          volumeMounts:
+            - name: vitastor-config
+              mountPath: /etc/vitastor
+      volumes:
+        - name: vitastor-config
+          configMap:
+            name: vitastor-config
+      serviceAccountName: vitastor-controller-manager

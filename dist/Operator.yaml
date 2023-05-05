@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vitastor-operator-deployment
+  namespace: vitastor-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vitastor-operator-controller
+  template:
+    metadata:
+      labels:
+        app: vitastor-operator-controller
+    spec:
+      containers:
+        - name: vitastor-operator-controller
+          image: antilles/vitastor-operator-controller:0.1
+          imagePullPolicy: Always
+          env:
+            - name: "CONTAINER_PORT"
+              value: "5666"
+            - name: "OSD_IMAGE"
+              value: "antilles/vitastor-osd:0.1"
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1000Mi
+      serviceAccountName: demo-operator-svc

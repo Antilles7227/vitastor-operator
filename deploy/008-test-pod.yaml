@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vitastor-pvc-test
+  namespace: vitastor-system
+spec:
+  restartPolicy: Always
+  nodeName: rbkube-node-ord3.i
+  containers:
+  - name: vitastor-test-perf
+    image: antilles/vitastor-osd:0.8
+    command: [ "/bin/bash", "-c", "--" ]
+    args:
+      - "while true; do sleep 30; done;"
+    resources:
+      limits:
+        memory: "512Mi"
+        cpu: "8000m"
+    volumeMounts:
+      - name: vitastor-config
+        mountPath: /etc/vitastor
+    volumeDevices:
+      - name: vitastor-block
+        devicePath: /dev/xvda
+
+  volumes:
+    - name: vitastor-config
+      configMap:
+        name: vitastor-config
+    - name: vitastor-block
+      persistentVolumeClaim:
+        claimName: test-vitastor-pvc-block
+        readOnly: false

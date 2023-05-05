@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: ConfigMap
+data:
+  vitastor.conf: |-
+    {"etcd_address":["<ETCD IP>:<ETCD PORT>"],
+    "etcd_prefix": "/vitastor",
+    "osd_network": "<POD CIDR>",
+    "bind_port": "5666"
+    }
+metadata:
+  namespace: vitastor-system
+  name: vitastor-config

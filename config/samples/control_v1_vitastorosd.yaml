@@ -1,0 +1,14 @@
+apiVersion: control.vitastor.io/v1
+kind: VitastorOSD
+metadata:
+  labels:
+    app.kubernetes.io/name: vitastorosd
+    app.kubernetes.io/instance: vitastorosd-sample
+    app.kubernetes.io/part-of: vitastor-operator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: vitastor-operator
+  name: vitastorosd-sample
+spec:
+  nodeName: "rke-node1"
+  osdPath: '/dev/disk/by-partuuid/29f9c4ac-f9a0-a945-ac4a-96a7b3994fe2'
+
