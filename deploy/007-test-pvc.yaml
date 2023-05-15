@@ -5,7 +5,8 @@ metadata:
   name: test-vitastor-pvc-block
   namespace: vitastor-system
 spec:
-  storageClassName: vitastor
+  storageClassName: test-pool # Same as VitastorPool name
+  
   volumeMode: Block
   accessModes:
     - ReadWriteMany

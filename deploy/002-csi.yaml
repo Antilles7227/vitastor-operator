@@ -167,7 +167,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: vitalif/vitastor-csi:v0.8.3
+          image: vitalif/vitastor-csi:v0.8.9
           args:
             - "--node=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -581,7 +581,7 @@ spec:
             privileged: true
             capabilities:
               add: ["SYS_ADMIN"]
-          image: vitalif/vitastor-csi:v0.8.3
+          image: vitalif/vitastor-csi:v0.8.9
           args:
             - "--node=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
