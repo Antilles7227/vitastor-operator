@@ -178,7 +178,7 @@ rules:
   - get
   - list
   - watch 
-  
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -217,7 +217,7 @@ spec:
     spec:
       containers:
         - name: vitastor-operator
-          image: antilles/vitastor-operator:0.8.5
+          image: antilles/vitastor-operator:0.8.9
           imagePullPolicy: IfNotPresent
           env:
             - name: "CONTAINER_PORT"

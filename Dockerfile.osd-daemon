@@ -1,0 +1,8 @@
+FROM debian:bullseye
+
+RUN apt-get update && apt-get install -y wget gnupg && \
+    wget -q -O - https://vitastor.io/debian/pubkey | apt-key add - && \
+    echo 'deb https://vitastor.io/debian bullseye main' >> /etc/apt/sources.list && \
+    apt-get update && apt-get install -y vitastor lp-solve && apt-get clean
+
+ENTRYPOINT ["vitastor-disk", "exec-osd"]
