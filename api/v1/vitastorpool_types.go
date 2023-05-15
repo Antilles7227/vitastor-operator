@@ -47,6 +47,7 @@ type VitastorPoolStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resourse:scope=Cluster
 
 // VitastorPool is the Schema for the vitastorpools API
 type VitastorPool struct {

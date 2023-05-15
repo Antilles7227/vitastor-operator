@@ -34,6 +34,9 @@ spec:
           spec:
             description: VitastorClusterSpec defines the desired state of VitastorCluster
             properties:
+              agentImage:
+                description: Agent image name/tag
+                type: string
               createPSA:
                 description: Create Pod Security Admission for Agent DaemonSet or
                   not
@@ -41,14 +44,27 @@ spec:
               createPSP:
                 description: Create Pod Security Policy for Agent DaemonSet or not
                 type: boolean
+              disksReconciligPeriod:
+                description: Reconcile period in seconds
+                type: integer
+              monitorImage:
+                description: Monitor image name/tag
+                type: string
               monitorReplicaNum:
                 description: Number of replicas for monitors
                 type: integer
+              osdImage:
+                description: OSD image name/tag
+                type: string
               vitastorNodeLabel:
                 description: Node label for Agent DaemonSet nodeSelector
                 type: string
             required:
+            - agentImage
+            - disksReconciligPeriod
+            - monitorImage
             - monitorReplicaNum
+            - osdImage
             - vitastorNodeLabel
             type: object
           status:
@@ -59,6 +75,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 
 ---
 apiVersion: apiextensions.k8s.io/v1
@@ -180,6 +197,89 @@ spec:
                 items:
                   type: string
                 type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.9.2
+  name: vitastorpools.control.vitastor.io
+spec:
+  group: control.vitastor.io
+  names:
+    kind: VitastorPool
+    listKind: VitastorPoolList
+    plural: vitastorpools
+    singular: vitastorpool
+  scope: Cluster
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: VitastorPool is the Schema for the vitastorpools API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VitastorPoolSpec defines the desired state of VitastorPool
+            properties:
+              blockSize:
+                format: int32
+                type: integer
+              failureDomain:
+                type: string
+              id:
+                description: Foo is an example field of VitastorPool. Edit vitastorpool_types.go
+                  to remove/update
+                type: string
+              immediateCommit:
+                type: string
+              maxOSDCombinations:
+                format: int32
+                type: integer
+              osdTags:
+                type: string
+              parityChunks:
+                format: int32
+                type: integer
+              pgCount:
+                format: int32
+                type: integer
+              pgMinSize:
+                format: int32
+                type: integer
+              pgSize:
+                format: int32
+                type: integer
+              scheme:
+                type: string
+            required:
+            - failureDomain
+            - id
+            - pgCount
+            - pgMinSize
+            - pgSize
+            - scheme
+            type: object
+          status:
+            description: VitastorPoolStatus defines the observed state of VitastorPool
             type: object
         type: object
     served: true
