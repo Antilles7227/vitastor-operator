@@ -279,7 +279,7 @@ func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv1.Vit
 	}
 	privilegedContainer := true
 	dsLabels := map[string]string{"app": "vitastor-agent"}
-	nodeLabels := map[string]string{"vitastor-node": "true"}
+	nodeLabels := map[string]string{cluster.Spec.VitastorNodeLabel: "true"}
 
 	ds := appsv1.DaemonSet{
 		ObjectMeta: ctrl.ObjectMeta{

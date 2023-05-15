@@ -120,6 +120,44 @@ rules:
   - patch
   - update
 - apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorpools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorpools/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorpools/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - v1
   resources:
   - configmaps

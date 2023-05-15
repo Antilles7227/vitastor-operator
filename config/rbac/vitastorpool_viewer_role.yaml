@@ -1,0 +1,27 @@
+# permissions for end users to view vitastorpools.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: vitastorpool-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: vitastor-operator
+    app.kubernetes.io/part-of: vitastor-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: vitastorpool-viewer-role
+rules:
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorpools
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - control.vitastor.io
+  resources:
+  - vitastorpools/status
+  verbs:
+  - get
