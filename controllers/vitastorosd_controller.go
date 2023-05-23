@@ -118,6 +118,7 @@ func (r *VitastorOSDReconciler) getConfiguration(osd *controlv1.VitastorOSD) (*a
 							Ports: []corev1.ContainerPort{{ContainerPort: containerPort}},
 						},
 					},
+					PriorityClassName: "system-cluster-critical",
 					Volumes: []corev1.Volume{
 						{
 							Name: "host-dev",
@@ -162,8 +163,8 @@ func (r *VitastorOSDReconciler) getConfiguration(osd *controlv1.VitastorOSD) (*a
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds/finalizers,verbs=update
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=statefulsets/status,verbs=get
 //+kubebuilder:rbac:groups=v1,resources=configmaps,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to

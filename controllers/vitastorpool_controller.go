@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
-
+	"strings"
 	"go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -160,10 +160,7 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *VitastorPoolReconciler) getStorageClassConfig(pool *controlv1.VitastorPool, config *VitastorConfig) (*storage.StorageClass, error) {
-	var etcdUrlsStr string = ""
-	for _, s := range config.VitastorEtcdUrls {
-		etcdUrlsStr += s
-	}
+	var etcdUrlsStr string = strings.Join(config.VitastorEtcdUrls, ",")
 
 	storageClassParameters := map[string]string{
 		"etcdVolumePrefix": "",
