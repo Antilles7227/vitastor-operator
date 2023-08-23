@@ -198,7 +198,60 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	// Checking OSD images
+	oldOSD := &controlv1.VitastorOSDList{}
+	newOSD := &controlv1.VitastorOSDList{}
+	oldOSD, newOSD, err = r.getOSDList(&vitastorCluster, namespace, ctx)
+	if err != nil {
+		log.Error(err, "Error during OSD Statefulsets fetching")
+		return ctrl.Result{}, err
+	}
+	for _, osd := range(newOSD.Items) {
+		osdSts := &appsv1.StatefulSet{}
+		if err := r.Get(ctx, types.NamespacedName{Name: osd.Name, Namespace: namespace}, osdSts); err != nil {
+			log.Error(err, "New VitastorOSD StatefulSet is not found, skipping")
+			return ctrl.Result{}, err
+		}
+		if osdSts.Status.Replicas != osdSts.Status.ReadyReplicas {
+			log.Info("There are offline OSD with new version, delaying upgrade for a 10 seconds for next check until all new OSD is up and running")
+			return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
+		}
+	}
+	if len(oldOSD.Items) > 0 {
+		log.Info("Updating OSD for new version")
+		oldOSD.Items[0].Spec.OSDImage = vitastorCluster.Spec.OSDImage
+		if err := r.Update(ctx, &oldOSD.Items[0]); err != nil {
+			log.Error(err, "Failed to update OSD CRD")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *VitastorClusterReconciler) getOSDList(cluster *controlv1.VitastorCluster, namespace string, ctx context.Context) (*controlv1.VitastorOSDList, *controlv1.VitastorOSDList, error) {
+	var log = log.FromContext(ctx)
+	oldOSD := &controlv1.VitastorOSDList{}
+	newOSD := &controlv1.VitastorOSDList{}
+	
+	getOptsNew := []client.ListOption{
+		client.InNamespace(namespace),
+		client.MatchingFields{"spec.osdImage": cluster.Spec.OSDImage},
+	}
+	getOptsOld := []client.ListOption{
+		client.InNamespace(namespace),
+		client.MatchingFieldsSelector{
+
+		},
+	}
+	log.Info("Fetching agents...")
+	if err := r.List(ctx, newOSD, getOptsNew...); err != nil {
+		log.Error(err, "unable to fetch Vitastor agents")
+		return nil, nil, client.IgnoreNotFound(err)
+	}
+
+	return &controlv1.VitastorOSDList{}, &controlv1.VitastorOSDList{}, nil
 }
 
 func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string) (*controlv1.VitastorNode, error) {
