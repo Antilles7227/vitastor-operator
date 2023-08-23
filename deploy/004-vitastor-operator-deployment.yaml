@@ -235,19 +235,11 @@ spec:
     spec:
       containers:
         - name: vitastor-operator
-          image: antilles/vitastor-operator:0.8.10
+          image: antilles/vitastor-operator:0.1.0
           imagePullPolicy: IfNotPresent
           env:
             - name: "CONTAINER_PORT"
               value: "5666"
-            - name: "OSD_IMAGE"
-              value: "antilles/vitastor-osd:0.8"
-            - name: "MONITOR_IMAGE"
-              value: "antilles/vitastor-monitor:0.8.6"
-            - name: "AGENT_IMAGE"
-              value: "antilles/vitastor-agent:0.8"
-            - name: "UPDATE_INTERVAL"
-              value: "2"
           resources:
             limits:
               cpu: 1000m

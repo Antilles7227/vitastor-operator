@@ -180,7 +180,7 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			if errors.IsNotFound(err) {
 				// VitastorNode CRD for that node is not found - creating new one
 				log.Error(err, "VitastorNode CRD is not found, creating new one", "NodeName", agent.Spec.NodeName)
-				newVitastorNode, err := r.getVitastorNodeConfiguration(agent.Spec.NodeName)
+				newVitastorNode, err := r.getVitastorNodeConfiguration(agent.Spec.NodeName, vitastorCluster.Spec.OSDImage)
 				if err != nil {
 					log.Error(err, "Unable to get vitastorNode configuration")
 					return ctrl.Result{}, err
@@ -201,13 +201,14 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string) (*controlv1.VitastorNode, error) {
+func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string, image string) (*controlv1.VitastorNode, error) {
 	vitastorNode := &controlv1.VitastorNode{
 		ObjectMeta: ctrl.ObjectMeta{
 			Name: nodeName,
 		},
 		Spec: controlv1.VitastorNodeSpec{
 			NodeName: nodeName,
+			OSDImage: image,
 		},
 	}
 	return vitastorNode, nil

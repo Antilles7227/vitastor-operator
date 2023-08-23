@@ -70,8 +70,6 @@ spec:
     subresources:
       status: {}
 
-
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -145,6 +143,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
+  creationTimestamp: null
   name: vitastornodes.control.vitastor.io
 spec:
   group: control.vitastor.io
@@ -178,6 +177,12 @@ spec:
               nodeName:
                 description: Name of node that have disks for OSDs
                 type: string
+              osdImage:
+                description: OSD image name/tag
+                type: string
+            required:
+            - nodeName
+            - osdImage
             type: object
           status:
             description: VitastorNodeStatus defines the observed state of VitastorNode

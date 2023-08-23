@@ -341,7 +341,15 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log.Info("Checking existing VitastorOSD for deleting disabled OSDs")
 	for _, osd := range osdList.Items {
 		if contains_str_list(osdPaths, osd.Spec.OSDPath) {
-			// That disk still working in cluster, skipping
+			// That disk still working in cluster, checking image
+			if osd.Spec.OSDImage != vitastorNode.Spec.OSDImage {
+				log.Info("Updating OSD image", "osdName", osd.Name, "oldImage", osd.Spec.OSDImage, "newImage", vitastorNode.Spec.OSDImage)
+				osd.Spec.OSDImage = vitastorNode.Spec.OSDImage
+				if err := r.Update(ctx, &osd); err != nil {
+					log.Error(err, "Failed to update OSD object")
+					return ctrl.Result{}, err
+				}
+			}
 			continue
 		} else {
 			// OSD for that disk disappeared, deleting OSD
@@ -389,6 +397,7 @@ func (r *VitastorNodeReconciler) getConfiguration(osdPath string, osdNumber int,
 			NodeName:  node.Spec.NodeName,
 			OSDPath:   osdPath,
 			OSDNumber: osdNumber,
+			OSDImage: node.Spec.OSDImage,
 		},
 	}
 	return osd

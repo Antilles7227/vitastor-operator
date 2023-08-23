@@ -27,7 +27,9 @@ import (
 // VitastorNodeSpec defines the desired state of VitastorNode
 type VitastorNodeSpec struct {
 	// Name of node that have disks for OSDs
-	NodeName string `json:"nodeName,omitempty"`
+	NodeName string `json:"nodeName"`
+	// OSD image name/tag
+	OSDImage string `json:"osdImage"`
 }
 
 // VitastorNodeStatus defines the observed state of VitastorNode

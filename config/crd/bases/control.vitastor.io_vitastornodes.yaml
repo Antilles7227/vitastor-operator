@@ -38,6 +38,12 @@ spec:
               nodeName:
                 description: Name of node that have disks for OSDs
                 type: string
+              osdImage:
+                description: OSD image name/tag
+                type: string
+            required:
+            - nodeName
+            - osdImage
             type: object
           status:
             description: VitastorNodeStatus defines the observed state of VitastorNode
