@@ -38,6 +38,9 @@ spec:
               nodeName:
                 description: Name of node
                 type: string
+              osdImage:
+                description: OSD container image
+                type: string
               osdNumber:
                 description: Number allocated to OSD
                 type: integer
@@ -49,6 +52,7 @@ spec:
                 type: string
             required:
             - nodeName
+            - osdImage
             - osdNumber
             - osdPath
             type: object

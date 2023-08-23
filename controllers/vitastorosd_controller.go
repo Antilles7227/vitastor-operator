@@ -206,8 +206,18 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			return ctrl.Result{Requeue: true}, nil
 		}
-		log.Error(err, "Failed to fetch monitor deployment")
+		log.Error(err, "Failed to fetch osd deployment")
 		return ctrl.Result{}, err
+	}
+
+	//Check OSD image
+	if foundSts.Spec.Template.Spec.Containers[0].Image != vitastorOSD.Spec.OSDImage {
+		log.Info("OSD image mismatch")
+		foundSts.Spec.Template.Spec.Containers[0].Image = vitastorOSD.Spec.OSDImage
+		if err := r.Update(ctx, foundSts); err != nil {
+			log.Error(err, "Failed to update OSD statefulset")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -217,6 +227,6 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *VitastorOSDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&controlv1.VitastorOSD{}).
-		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
 }

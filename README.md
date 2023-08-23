@@ -1,94 +1,87 @@
 # vitastor-operator
-// TODO(user): Add simple overview of use/purpose
+Kubernetes operator for Vitastor - software-defined block storage.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Vitastor is a distributed block SDS, direct replacement of Ceph RBD and internal SDS's of public clouds.
+
+Vitastor is architecturally similar to Ceph which means strong consistency, primary-replication, symmetric clustering and automatic data distribution over any number of drives of any size with configurable redundancy (replication or erasure codes/XOR).
+
+Vitastor targets primarily SSD and SSD+HDD clusters with at least 10 Gbit/s network, supports TCP and RDMA and may achieve 4 KB read and write latency as low as ~0.1 ms with proper hardware which is ~10 times faster than other popular SDS's like Ceph or internal systems of public clouds.
+
+Operator are built with Kubebuilder - a framework for building Kubernetes APIs with CRDs.
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
 **Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
 
-### Running on the cluster
-1. Install Instances of Custom Resources:
+Also you need an etcd cluster for Vitastor with some additional tuning:
+* max-txn-ops should be at least 100000
+* I recommend to increase quota-backend-bytes (especially for large clusters), in some cases you can reach quota limit and it will stop etcd cluster at all.
+
+### Running on the cluster 
+1. Create namespace for vitastor and ConfigMap with vitastor.conf:
 
 ```sh
-kubectl apply -f config/samples/
+kubectl apply -f deploy/000-vitastor-csi-namespace.yaml
+kubectl apply -f deploy/001-vitastor-configmap-osd.yaml
 ```
 
-2. Build and push your image to the location specified by `IMG`:
+2. Install CSI driver pods and CSI provisioner:
+
+```sh
+kubectl apply -f deploy/002-csi.yaml
+```
+
+3. Install Instances of Custom Resources:
+
+```sh
+kubectl apply -f deploy/003-vitastor-crd.yaml
+```
 	
-```sh
-make docker-build docker-push IMG=<some-registry>/vitastor-operator:tag
-```
-	
-3. Deploy the controller to the cluster with the image specified by `IMG`:
+4. Deploy the controller to the cluster (fix image name/tag if you want to use self-hosted images)
 
 ```sh
-make deploy IMG=<some-registry>/vitastor-operator:tag
+kubectl apply -f deploy/004-vitastor-operator-deployment.yaml
 ```
 
-### Uninstall CRDs
-To delete the CRDs from the cluster:
+5. Check cluster manifest (e.g. to set proper number of monitors, set label and image names if need so) and apply it
 
 ```sh
-make uninstall
+kubectl apply -f deploy/005-sample-vitastor-cluster.yaml
 ```
 
-### Undeploy controller
-UnDeploy the controller to the cluster:
+6. Apply labels for nodes with disks (so operator can deploy agents to it and see empty disks on them)
 
 ```sh
-make undeploy
+kubectl label nodes <your-node-name> vitastor-node=true
 ```
 
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+7. Prepare your disks for OSD using Agent API (right now it can be done through `curl`, in future there will be kubectl plugin for operational things).
 
-### How it works
-This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
-
-It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/) 
-which provides a reconcile function responsible for synchronizing resources untile the desired state is reached on the cluster 
-
-### Test It Out
-1. Install the CRDs into the cluster:
+**Note:** If you are using NVMe disk bigger than 2TiB, it's recommended to use more than one OSD per disk (for better IO utilization). It not, you may omit field `osd_num` in `curl` request.
 
 ```sh
-make install
+# Use IPs from output to prepare disks
+kubectl get pods -n vitastor-system -o custom-columns=NAME:.metadata.name,IP:.status.podIP | grep vitastor-agent
+# Make request for every disk you want to use for Vitastor
+curl -XPOST -H 'Content-Type: application/json' -d '{"disk": "<disk path>", "osd_num": <number of OSD per disk>}' http://<AGENT IP>:8000/disk/prepare
 ```
 
-2. Run your controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
+8. Create Pool for PVs. You may change some options of that pool, e.g. redundancy scheme (`xor`, `replicated` or `ec`), number of PGs, failure domain etc. Check [Vitastor docs](https://git.yourcmc.ru/vitalif/vitastor/src/branch/master/docs/config/pool.en.md) for more info (not all options supported right now)
 
 ```sh
-make run
+kubectl apply deploy/006-sample-vitastor-pool.yaml
 ```
 
-**NOTE:** You can also run this in one step by running: `make install run`
+That's it! Now you can use created pool as StorageClass for your PVCs
 
-### Modifying the API definitions
-If you are editing the API definitions, generate the manifests such as CRs or CRDs using:
 
-```sh
-make manifests
-```
+## TODO
 
-**NOTE:** Run `make --help` for more information on all potential `make` targets
+* kubectl plugin for operator&vitastor maintenance
+* More options for cluster tuning
+* Automatic decomission and replacing disks
 
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+## Contacts
 
-## License
-
-Copyright 2022.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+If you have any questions about that Operator and/or Vitastor itself, feel free to join out Telegram chat: [@vitastor](https://t.me/vitastor)

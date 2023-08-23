@@ -19,8 +19,6 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"time"
-	"strings"
 	"go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -31,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"strings"
+	"time"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 )

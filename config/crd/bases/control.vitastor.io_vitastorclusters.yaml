@@ -13,7 +13,7 @@ spec:
     listKind: VitastorClusterList
     plural: vitastorclusters
     singular: vitastorcluster
-  scope: Namespaced
+  scope: Cluster
   versions:
   - name: v1
     schema:
@@ -38,13 +38,6 @@ spec:
               agentImage:
                 description: Agent image name/tag
                 type: string
-              createPSA:
-                description: Create Pod Security Admission for Agent DaemonSet or
-                  not
-                type: boolean
-              createPSP:
-                description: Create Pod Security Policy for Agent DaemonSet or not
-                type: boolean
               disksReconciligPeriod:
                 description: Reconcile period in seconds
                 type: integer

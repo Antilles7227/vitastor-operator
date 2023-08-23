@@ -32,6 +32,8 @@ type VitastorOSDSpec struct {
 	OSDPath string `json:"osdPath"`
 	// Number allocated to OSD
 	OSDNumber int `json:"osdNumber"`
+	// OSD container image
+	OSDImage string `json:"osdImage"` 
 	// // Tags that applied to OSD (divided by comma, i.e. "hostN,nvme,dcN")
 	// +optional
 	OSDTags string `json:"osdTags"`

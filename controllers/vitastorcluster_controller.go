@@ -243,7 +243,7 @@ func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.V
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("1000m"),
-									corev1.ResourceMemory: resource.MustParse("128Mi"),
+									corev1.ResourceMemory: resource.MustParse("1024Mi"),
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
@@ -266,7 +266,9 @@ func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.V
 					},
 				},
 			},
-			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+			},
 		},
 	}
 	return &depl, nil
@@ -306,7 +308,7 @@ func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv1.Vit
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("1000m"),
-									corev1.ResourceMemory: resource.MustParse("128Mi"),
+									corev1.ResourceMemory: resource.MustParse("1024Mi"),
 								},
 							},
 							Ports: []corev1.ContainerPort{{ContainerPort: 8000}},

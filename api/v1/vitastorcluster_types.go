@@ -37,10 +37,6 @@ type VitastorClusterSpec struct {
 	MonitorImage string `json:"monitorImage"`
 	// OSD image name/tag
 	OSDImage string `json:"osdImage"`
-	// Create Pod Security Policy for Agent DaemonSet or not
-	CreatePSP bool `json:"createPSP,omitempty"`
-	// Create Pod Security Admission for Agent DaemonSet or not
-	CreatePSA bool `json:"createPSA,omitempty"`
 }
 
 // VitastorClusterStatus defines the observed state of VitastorCluster
@@ -49,8 +45,7 @@ type VitastorClusterStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:resourse:scope=Cluster
-
+//+kubebuilder:resource:scope=Cluster
 // VitastorCluster is the Schema for the vitastorclusters API
 type VitastorCluster struct {
 	metav1.TypeMeta   `json:",inline"`
