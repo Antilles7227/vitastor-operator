@@ -76,6 +76,12 @@ kubectl apply deploy/006-sample-vitastor-pool.yaml
 That's it! Now you can use created pool as StorageClass for your PVCs
 
 
+9. Optional: By default, operator create additional placement level `dc` (Datacenter).
+You can label your nodes with `fd.vitastor.io/<placement level name>: <value>` and operator will link node to that failue domain (it will be useful if you use [complex failure domain](https://git.yourcmc.ru/vitalif/vitastor/src/branch/master/docs/config/pool.en.md#level_placement) )
+```sh
+kubectl label node <node_name> fd.vitastor.io/dc: "DCNAME"
+```
+
 ## TODO
 
 * kubectl plugin for operator&vitastor maintenance

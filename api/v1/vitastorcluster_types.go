@@ -43,9 +43,9 @@ type VitastorClusterSpec struct {
 type VitastorClusterStatus struct {
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:resource:scope=Cluster
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
 // VitastorCluster is the Schema for the vitastorclusters API
 type VitastorCluster struct {
 	metav1.TypeMeta   `json:",inline"`

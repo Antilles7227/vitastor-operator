@@ -18,15 +18,17 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"time"
 
-	"go.etcd.io/etcd/client/v3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -77,6 +79,25 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if !isEmpty {
 		namespace = "vitastor-system"
 	}
+
+	// Check placement_levels to fix
+	placementLevels := map[string]int32{
+		"dc":   99,
+		"host": 100,
+		"osd":  101,
+	}
+	placementLevelBytes, err := json.Marshal(placementLevels)
+	if err != nil {
+		log.Error(err, "Unable to marshal placement level block")
+		return ctrl.Result{}, err
+	}
+	nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
+	placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
+	if err != nil {
+		log.Error(err, "Unable to update placement level list")
+		return ctrl.Result{}, err
+	}
+	log.Info(placementLevelResp.Header.String())
 
 	var vitastorCluster controlv1.VitastorCluster
 	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorCluster); err != nil {
@@ -269,6 +290,10 @@ func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.V
 			},
 			Strategy: appsv1.DeploymentStrategy{
 				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &intstr.IntOrString{IntVal: 1},
+					MaxSurge:       &intstr.IntOrString{IntVal: 1},
+				},
 			},
 		},
 	}

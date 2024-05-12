@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -116,12 +117,20 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	placementLevelsStatic := []string{"dc"} // TODO: that list should be inside VitastorCluster CRD
 
 	var vitastorNode controlv1.VitastorNode
 	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorNode); err != nil {
 		log.Error(err, "unable to fetch VitastorNode, skipping")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	var k8sNode corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &k8sNode); err != nil {
+		log.Error(err, "unable to fetch Node, skipping")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
 	// Check node placement and set if empty
 	log.Info("Checking node_placement config")
 	nodePlacementPath := config.VitastorPrefix + "/config/node_placement"
@@ -141,6 +150,23 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		placementLevel = make(map[string]VitastorNodePlacement)
 	}
 	placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host"}
+	// Check if node has fd.vitastor.io labels
+	for label, value := range k8sNode.Labels {
+		if strings.Contains(label, "fd.vitastor.io") {
+			splittedLabel := strings.Split(label, "/")
+			if contains_str_list(placementLevelsStatic, splittedLabel[1]) {
+				// Node labeled properly, check if that label exist in placements
+				_, ok := placementLevel[value]
+				// If the key not exists
+				if !ok {
+					placementLevel[value] = VitastorNodePlacement{Level: "dc"}
+				}
+				// Updating placement level with proper parent
+				placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host", Parent: value}
+			}
+		}
+	}
+
 	var placementLevelBytes []byte
 	placementLevelBytes, err = json.Marshal(placementLevel)
 	if err != nil {
@@ -165,8 +191,11 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log.Info("Fetching agent for that VitastorNode...")
 	if err := r.List(ctx, agentList, getOpts...); err != nil {
 		log.Error(err, "unable to fetch agent for that VitastorNode CRD")
-		log.Error(err, "Unable to update status of node")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if len(agentList.Items) == 0 {
+		log.Info("Seems like that agent Pod is not running, reschedule reconciling...")
+		return ctrl.Result{RequeueAfter: time.Duration(updateInterval) * time.Minute}, nil
 	}
 	agentIP := agentList.Items[0].Status.PodIP
 	systemDisksURL := "http://" + agentIP + ":8000/disk"
@@ -349,6 +378,8 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					log.Error(err, "Failed to update OSD object")
 					return ctrl.Result{}, err
 				}
+				log.Info("Updated OSD image, waiting for changes to apply", "osdName", osd.Name, "image", osd.Spec.OSDImage)
+				return ctrl.Result{RequeueAfter: time.Duration(3) * time.Minute}, nil // TODO: make parametrized sync duration, 3 minutes seems to be okay for beginning
 			}
 			continue
 		} else {
@@ -357,7 +388,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			err := r.Delete(ctx, &osd)
 			if err != nil {
 				log.Error(err, "Failed to delete OSD")
-				return ctrl.Result{}, err
+				return ctrl.Result{RequeueAfter: time.Duration(updateInterval) * time.Minute}, err
 			}
 		}
 	}
@@ -397,7 +428,7 @@ func (r *VitastorNodeReconciler) getConfiguration(osdPath string, osdNumber int,
 			NodeName:  node.Spec.NodeName,
 			OSDPath:   osdPath,
 			OSDNumber: osdNumber,
-			OSDImage: node.Spec.OSDImage,
+			OSDImage:  node.Spec.OSDImage,
 		},
 	}
 	return osd
