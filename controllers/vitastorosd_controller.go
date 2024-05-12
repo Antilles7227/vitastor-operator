@@ -43,7 +43,10 @@ type VitastorOSDReconciler struct {
 }
 
 func (r *VitastorOSDReconciler) getConfiguration(osd *controlv1.VitastorOSD) (*appsv1.StatefulSet, error) {
-	namespace := osd.Namespace
+	namespace, isEmpty := os.LookupEnv("NAMESPACE")
+	if !isEmpty {
+		namespace = "vitastor-system"
+	}
 	imageName := osd.Spec.OSDImage
 	containerPortRaw, isEmpty := os.LookupEnv("CONTAINER_PORT")
 	if !isEmpty {
