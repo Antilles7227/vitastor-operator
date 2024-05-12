@@ -12,6 +12,6 @@ spec:
   monitorReplicaNum: 3
   vitastorNodeLabel: "vitastor-node"
   disksReconciligPeriod: 60
-  agentImage: "antilles/vitastor-agent:0.8.9"
-  monitorImage: "antilles/vitastor-monitor:0.8.9"
-  osdImage: "antilles/vitastor-osd:0.8.9"
+  agentImage: "antilles/vitastor-agent:1.6.0"
+  monitorImage: "antilles/vitastor-monitor:1.6.0"
+  osdImage: "antilles/vitastor-osd:1.6.0"

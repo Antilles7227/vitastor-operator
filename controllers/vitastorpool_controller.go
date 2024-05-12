@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"strings"
 	"time"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
@@ -160,13 +159,10 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (r *VitastorPoolReconciler) getStorageClassConfig(pool *controlv1.VitastorPool, config *VitastorConfig) (*storage.StorageClass, error) {
-	var etcdUrlsStr string = strings.Join(config.VitastorEtcdUrls, ",")
 
 	storageClassParameters := map[string]string{
 		"etcdVolumePrefix": "",
 		"poolId":           pool.Spec.ID,
-		"etcdUrl":          etcdUrlsStr,
-		"etcdPrefix":       config.VitastorPrefix,
 	}
 
 	storageClass := storage.StorageClass{

@@ -18,6 +18,8 @@ Also you need an etcd cluster for Vitastor with some additional tuning:
 * max-txn-ops should be at least 100000
 * I recommend to increase quota-backend-bytes (especially for large clusters), in some cases you can reach quota limit and it will stop etcd cluster at all.
 
+You can use baremetal etcd cluster or use [Etcd Operator](https://github.com/aenix-io/etcd-operator) to keep all your Vitastor stuff inside your cluster.
+
 ### Running on the cluster 
 1. Create namespace for vitastor and ConfigMap with vitastor.conf:
 

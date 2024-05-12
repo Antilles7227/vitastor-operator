@@ -235,7 +235,7 @@ spec:
     spec:
       containers:
         - name: vitastor-operator
-          image: antilles/vitastor-operator:0.1.0
+          image: antilles/vitastor-operator:1.0.0
           imagePullPolicy: IfNotPresent
           env:
             - name: "CONTAINER_PORT"

@@ -1,77 +1,4 @@
 ---
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  namespace: vitastor-system
-  name: vitastor-csi-nodeplugin-psp
-spec:
-  allowPrivilegeEscalation: true
-  allowedCapabilities:
-    - 'SYS_ADMIN'
-  fsGroup:
-    rule: RunAsAny
-  privileged: true
-  hostNetwork: true
-  hostPID: true
-  runAsUser:
-    rule: RunAsAny
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  volumes:
-    - 'configMap'
-    - 'emptyDir'
-    - 'projected'
-    - 'secret'
-    - 'downwardAPI'
-    - 'hostPath'
-  allowedHostPaths:
-    - pathPrefix: '/dev'
-      readOnly: false
-    - pathPrefix: '/run/mount'
-      readOnly: false
-    - pathPrefix: '/sys'
-      readOnly: false
-    - pathPrefix: '/lib/modules'
-      readOnly: true
-    - pathPrefix: '/var/lib/kubelet/pods'
-      readOnly: false
-    - pathPrefix: '/var/lib/kubelet/plugins/csi.vitastor.io'
-      readOnly: false
-    - pathPrefix: '/var/lib/kubelet/plugins_registry'
-      readOnly: false
-    - pathPrefix: '/var/lib/kubelet/plugins'
-      readOnly: false
-
----
-kind: Role
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  namespace: vitastor-system
-  name: vitastor-csi-nodeplugin-psp
-rules:
-  - apiGroups: ['policy']
-    resources: ['podsecuritypolicies']
-    verbs: ['use']
-    resourceNames: ['vitastor-csi-nodeplugin-psp']
-
----
-kind: RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  namespace: vitastor-system
-  name: vitastor-csi-nodeplugin-psp
-subjects:
-  - kind: ServiceAccount
-    name: vitastor-csi-nodeplugin
-    namespace: vitastor-system
-roleRef:
-  kind: Role
-  name: vitastor-csi-nodeplugin-psp
-  apiGroup: rbac.authorization.k8s.io
-
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -167,7 +94,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: vitalif/vitastor-csi:v0.8.9
+          image: antilles/vitastor-csi:1.6.0
           args:
             - "--node=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -199,6 +126,8 @@ spec:
             timeoutSeconds: 3
             periodSeconds: 2
           volumeMounts:
+            - name: run-csi
+              mountPath: /run/vitastor-csi
             - name: socket-dir
               mountPath: /csi
             - mountPath: /dev
@@ -239,6 +168,10 @@ spec:
           - mountPath: /csi
             name: socket-dir
       volumes:
+        - name: run-csi
+          hostPath:
+            path: /run/vitastor-csi
+            type: Directory
         - name: socket-dir
           hostPath:
             path: /var/lib/kubelet/plugins/csi.vitastor.io
@@ -271,66 +204,6 @@ spec:
           configMap:
             name: vitastor-config
 
----
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  namespace: vitastor-system
-  name: vitastor-csi-provisioner-psp
-spec:
-  allowPrivilegeEscalation: true
-  allowedCapabilities:
-    - 'SYS_ADMIN'
-  fsGroup:
-    rule: RunAsAny
-  privileged: true
-  runAsUser:
-    rule: RunAsAny
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  volumes:
-    - 'configMap'
-    - 'emptyDir'
-    - 'projected'
-    - 'secret'
-    - 'downwardAPI'
-    - 'hostPath'
-  allowedHostPaths:
-    - pathPrefix: '/dev'
-      readOnly: false
-    - pathPrefix: '/sys'
-      readOnly: false
-    - pathPrefix: '/lib/modules'
-      readOnly: true
-
----
-kind: Role
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  namespace: vitastor-system
-  name: vitastor-csi-provisioner-psp
-rules:
-  - apiGroups: ['policy']
-    resources: ['podsecuritypolicies']
-    verbs: ['use']
-    resourceNames: ['vitastor-csi-provisioner-psp']
-
----
-kind: RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: vitastor-csi-provisioner-psp
-  namespace: vitastor-system
-subjects:
-  - kind: ServiceAccount
-    name: vitastor-csi-provisioner
-    namespace: vitastor-system
-roleRef:
-  kind: Role
-  name: vitastor-csi-provisioner-psp
-  apiGroup: rbac.authorization.k8s.io
 
 ---
 apiVersion: v1
@@ -581,7 +454,7 @@ spec:
             privileged: true
             capabilities:
               add: ["SYS_ADMIN"]
-          image: vitalif/vitastor-csi:v0.8.9
+          image: antilles/vitastor-csi:1.6.0
           args:
             - "--node=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"
