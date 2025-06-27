@@ -19,6 +19,8 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -29,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"time"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 )
@@ -110,13 +111,14 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		pools = make(map[string]VitastorPoolConfig)
 	}
 	pools[vitastorPool.Spec.ID] = VitastorPoolConfig{
-		Name:          vitastorPool.Name,
-		Scheme:        vitastorPool.Spec.Scheme,
-		PGSize:        vitastorPool.Spec.PGSize,
-		PGMinSize:     vitastorPool.Spec.PGMinSize,
-		ParityChunks:  vitastorPool.Spec.ParityChunks,
-		PGCount:       vitastorPool.Spec.PGCount,
-		FailureDomain: vitastorPool.Spec.FailureDomain,
+		Name:            vitastorPool.Name,
+		Scheme:          vitastorPool.Spec.Scheme,
+		PGSize:          vitastorPool.Spec.PGSize,
+		PGMinSize:       vitastorPool.Spec.PGMinSize,
+		ParityChunks:    vitastorPool.Spec.ParityChunks,
+		PGCount:         vitastorPool.Spec.PGCount,
+		FailureDomain:   vitastorPool.Spec.FailureDomain,
+		ImmediateCommit: vitastorPool.Spec.ImmediateCommit,
 	}
 	var poolsBytes []byte
 	poolsBytes, err = json.Marshal(pools)
