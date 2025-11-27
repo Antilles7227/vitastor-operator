@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: vitastornodes.control.vitastor.io
 spec:
   group: control.vitastor.io
@@ -37,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: VitastorNodeSpec defines the desired state of VitastorNode
+            description: spec defines the desired state of VitastorNode
             properties:
               nodeName:
                 description: Name of node that have disks for OSDs
@@ -50,13 +50,16 @@ spec:
             - osdImage
             type: object
           status:
-            description: VitastorNodeStatus defines the observed state of VitastorNode
+            description: status defines the observed state of VitastorNode
             properties:
               disks:
                 description: List of disks on that node
                 items:
                   type: string
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               emptyDisks:
                 description: List of empty disks (without any partition) on that node
                 items:
@@ -68,6 +71,8 @@ spec:
                   type: string
                 type: array
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

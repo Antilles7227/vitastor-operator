@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- control_v1_vitastornode.yaml
+- control_v1_vitastorosd.yaml
+- control_v1_vitastorcluster.yaml
+- control_v1_vitastorpool.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,5 +1,5 @@
 /*
-Copyright 2022.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,8 +39,27 @@ type VitastorClusterSpec struct {
 	OSDImage string `json:"osdImage"`
 }
 
-// VitastorClusterStatus defines the observed state of VitastorCluster
+// VitastorClusterStatus defines the observed state of VitastorCluster.
 type VitastorClusterStatus struct {
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+
+	// For Kubernetes API conventions, see:
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+
+	// conditions represent the current state of the VitastorCluster resource.
+	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
+	//
+	// Standard condition types include:
+	// - "Available": the resource is fully functional
+	// - "Progressing": the resource is being created or updated
+	// - "Degraded": the resource failed to reach or maintain its desired state
+	//
+	// The status of each condition is one of True, False, or Unknown.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	// Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -48,14 +67,22 @@ type VitastorClusterStatus struct {
 // +kubebuilder:resource:scope=Cluster
 // VitastorCluster is the Schema for the vitastorclusters API
 type VitastorCluster struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
 
-	Spec   VitastorClusterSpec   `json:"spec,omitempty"`
-	Status VitastorClusterStatus `json:"status,omitempty"`
+	// metadata is a standard object metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+
+	// spec defines the desired state of VitastorCluster
+	// +required
+	Spec VitastorClusterSpec `json:"spec"`
+
+	// status defines the observed state of VitastorCluster
+	// +optional
+	Status VitastorClusterStatus `json:"status,omitempty,omitzero"`
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // VitastorClusterList contains a list of VitastorCluster
 type VitastorClusterList struct {

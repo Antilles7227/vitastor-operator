@@ -8,41 +8,7 @@ rules:
   - apps
   resources:
   - daemonsets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - daemonsets/status
-  verbs:
-  - get
-- apiGroups:
-  - apps
-  resources:
   - deployments
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - deployments/status
-  verbs:
-  - get
-- apiGroups:
-  - apps
-  resources:
   - statefulsets
   verbs:
   - create
@@ -55,6 +21,8 @@ rules:
 - apiGroups:
   - apps
   resources:
+  - daemonsets/status
+  - deployments/status
   - statefulsets/status
   verbs:
   - get
@@ -62,83 +30,8 @@ rules:
   - control.vitastor.io
   resources:
   - vitastorclusters
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastorclusters/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastorclusters/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
   - vitastornodes
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastornodes/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastornodes/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
   - vitastorosds
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastorosds/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
-  - vitastorosds/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - control.vitastor.io
-  resources:
   - vitastorpools
   verbs:
   - create
@@ -151,12 +44,18 @@ rules:
 - apiGroups:
   - control.vitastor.io
   resources:
+  - vitastorclusters/finalizers
+  - vitastornodes/finalizers
+  - vitastorosds/finalizers
   - vitastorpools/finalizers
   verbs:
   - update
 - apiGroups:
   - control.vitastor.io
   resources:
+  - vitastorclusters/status
+  - vitastornodes/status
+  - vitastorosds/status
   - vitastorpools/status
   verbs:
   - get

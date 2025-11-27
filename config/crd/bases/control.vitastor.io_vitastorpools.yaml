@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: vitastorpools.control.vitastor.io
 spec:
   group: control.vitastor.io
@@ -37,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: VitastorPoolSpec defines the desired state of VitastorPool
+            description: spec defines the desired state of VitastorPool
             properties:
               blockSize:
                 format: int32
@@ -45,8 +45,6 @@ spec:
               failureDomain:
                 type: string
               id:
-                description: Foo is an example field of VitastorPool. Edit vitastorpool_types.go
-                  to remove/update
                 type: string
               immediateCommit:
                 type: string
@@ -78,8 +76,10 @@ spec:
             - scheme
             type: object
           status:
-            description: VitastorPoolStatus defines the observed state of VitastorPool
+            description: status defines the observed state of VitastorPool
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
