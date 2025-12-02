@@ -45,4 +45,37 @@ resources:
   kind: VitastorPool
   path: gitlab.com/Antilles7227/vitastor-operator/api/v1
   version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorNode
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v2
+  version: v2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorDisk
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v2
+  version: v2
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorOSD
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v2
+  version: v2
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: vitastor.io
+  group: control
+  kind: VitastorPool
+  path: gitlab.com/Antilles7227/vitastor-operator/api/v2
+  version: v2
 version: "3"

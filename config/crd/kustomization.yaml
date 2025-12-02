@@ -6,6 +6,7 @@ resources:
 - bases/control.vitastor.io_vitastorosds.yaml
 - bases/control.vitastor.io_vitastorclusters.yaml
 - bases/control.vitastor.io_vitastorpools.yaml
+- bases/control.vitastor.io_vitastordisks.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

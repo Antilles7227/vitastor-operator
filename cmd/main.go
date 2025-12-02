@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 	"gitlab.com/Antilles7227/vitastor-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -49,6 +50,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(controlv1.AddToScheme(scheme))
+	utilruntime.Must(controlv2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -204,6 +206,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VitastorPool")
+		os.Exit(1)
+	}
+	if err := (&controller.VitastorDiskReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VitastorDisk")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

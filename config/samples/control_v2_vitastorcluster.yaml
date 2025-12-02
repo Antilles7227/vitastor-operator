@@ -1,0 +1,9 @@
+apiVersion: control.vitastor.io/v2
+kind: VitastorCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: vitastor-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: vitastorcluster-sample
+spec:
+  # TODO(user): Add fields here
