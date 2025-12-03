@@ -19,16 +19,15 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 // VitastorClusterReconciler reconciles a VitastorCluster object
@@ -61,6 +61,16 @@ type VitastorClusterReconciler struct {
 // move the current state of the cluster closer to the desired state.
 func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var log = log.FromContext(ctx)
+
+	// ===
+	// Preparations, getting cluster CR, connect to Vitastor etcd, checking namespace for resources
+	// ===
+	var vitastorCluster controlv2.VitastorCluster
+	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorCluster); err != nil {
+		log.Error(err, "Unable to fetch VitastorCluster, skipping")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
 	config, err := loadConfiguration(ctx, "/etc/vitastor/vitastor.conf")
 	if err != nil {
 		log.Error(err, "Unable to load vitastor.conf")
@@ -75,40 +85,56 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	defer cli.Close()
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
-	}
 
-	// Check placement_levels to fix
-	placementLevels := map[string]int32{
-		"dc":   99,
+	if vitastorCluster.Spec.VitastorClusterNamespace == "" {
+		vitastorCluster.Spec.VitastorClusterNamespace = "vitastor-system"
+	}
+	defaultPlacementLevels := map[string]int32{
 		"host": 100,
-		"osd":  101,
+		"disk": 110,
+		"osd":  120,
 	}
-	placementLevelBytes, err := json.Marshal(placementLevels)
-	if err != nil {
-		log.Error(err, "Unable to marshal placement level block")
-		return ctrl.Result{}, err
-	}
-	nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
-	placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-	if err != nil {
-		log.Error(err, "Unable to update placement level list")
-		return ctrl.Result{}, err
-	}
-	log.Info(placementLevelResp.Header.String())
 
-	var vitastorCluster controlv1.VitastorCluster
-	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorCluster); err != nil {
-		log.Error(err, "Unable to fetch VitastorCluster, skipping")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	monitorReplicas := int32(vitastorCluster.Spec.MonitorReplicaNum)
+	// ===
+	// Cluster-wide settings
+	// ===
 
-	// Check monitor deployment
+	// TODO: Compare existing node_placement tree with provided in CR to remove unnesessary Put
+	// TODO: Implement defaulter webhook to remove hardcoded placement level from reconciler loop
+	if len(vitastorCluster.Spec.ClusterParameters.PlacementLevels) == 0 {
+		log.Info("placement level not set for cluster, using default one")
+		placementLevelBytes, err := json.Marshal(defaultPlacementLevels)
+		if err != nil {
+			log.Error(err, "unable to marshal default placement level block")
+			return ctrl.Result{}, err
+		}
+		nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
+		placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
+		if err != nil {
+			log.Error(err, "unable to update placement level list with default levels")
+			return ctrl.Result{}, err
+		}
+		log.Info(placementLevelResp.Header.String())
+	} else {
+		placementLevelBytes, err := json.Marshal(vitastorCluster.Spec.ClusterParameters.PlacementLevels)
+		if err != nil {
+			log.Error(err, "unable to marshal placement level block")
+			return ctrl.Result{}, err
+		}
+		nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
+		placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
+		if err != nil {
+			log.Error(err, "unable to update placement level list")
+			return ctrl.Result{}, err
+		}
+		log.Info(placementLevelResp.Header.String())
+	}
+
+	// ===
+	// Monitors
+	// ===
 	monitorDeployment := &appsv1.Deployment{}
-	if err := r.Get(ctx, types.NamespacedName{Name: "vitastor-monitor", Namespace: namespace}, monitorDeployment); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: "vitastor-monitor", Namespace: vitastorCluster.Spec.VitastorClusterNamespace}, monitorDeployment); err != nil {
 		if errors.IsNotFound(err) {
 			// Deployment is not found - creating new one
 			log.Info("Deployment is not found, creating new one")
@@ -118,11 +144,11 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				return ctrl.Result{}, err
 			}
 			if err := controllerutil.SetControllerReference(&vitastorCluster, depl, r.Scheme); err != nil {
-				log.Error(err, "Failed to set owner deployment")
+				log.Error(err, "Failed to set owner for monitor deployment")
 				return ctrl.Result{}, err
 			}
 			if err := r.Create(ctx, depl); err != nil {
-				log.Error(err, "Failed to create new Deployment")
+				log.Error(err, "Failed to create new monitor Deployment")
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{Requeue: true}, nil
@@ -130,31 +156,40 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Error(err, "Failed to fetch monitor deployment")
 		return ctrl.Result{}, err
 	}
-
-	// Check monitor image
-	if monitorDeployment.Spec.Template.Spec.Containers[0].Image != vitastorCluster.Spec.MonitorImage {
+	// Image
+	if monitorDeployment.Spec.Template.Spec.Containers[0].Image != vitastorCluster.Spec.Monitor.Image {
 		log.Info("Monitor image mismatch, updating")
-		monitorDeployment.Spec.Template.Spec.Containers[0].Image = vitastorCluster.Spec.MonitorImage
+		monitorDeployment.Spec.Template.Spec.Containers[0].Image = vitastorCluster.Spec.Monitor.Image
 		if err := r.Update(ctx, monitorDeployment); err != nil {
-			log.Error(err, "Failed to update monitor deployment")
+			log.Error(err, "Failed to update monitor deployment during image update")
 			return ctrl.Result{}, err
 		}
 	}
-	// Check monitor replicas
-	if *monitorDeployment.Spec.Replicas != int32(vitastorCluster.Spec.MonitorReplicaNum) {
+	// Replicas
+	if *monitorDeployment.Spec.Replicas != int32(vitastorCluster.Spec.Monitor.Replicas) {
 		log.Info("Number of monitor replicas mismatch, updating")
-		monitorDeployment.Spec.Replicas = &monitorReplicas
+		monitorDeployment.Spec.Replicas = &vitastorCluster.Spec.Monitor.Replicas
 		if err := r.Update(ctx, monitorDeployment); err != nil {
-			log.Error(err, "Failed to update monitor deployment")
+			log.Error(err, "Failed to update monitor deployment during replica change")
+			return ctrl.Result{}, err
+		}
+	}
+	// Resources
+	if !reflect.DeepEqual(monitorDeployment.Spec.Template.Spec.Resources, &vitastorCluster.Spec.Monitor.Resources) {
+		log.Info("resources of monitor deployment differs, updating")
+		monitorDeployment.Spec.Template.Spec.Resources = &vitastorCluster.Spec.Monitor.Resources
+		if err := r.Update(ctx, monitorDeployment); err != nil {
+			log.Error(err, "Failed to update monitor deployment during resource requirement change")
 			return ctrl.Result{}, err
 		}
 	}
 
-	// Check agent daemonset
+	// ===
+	// Node Agent
+	// ===
 	agentDaemonSet := &appsv1.DaemonSet{}
-	if err := r.Get(ctx, types.NamespacedName{Name: "vitastor-agent", Namespace: namespace}, agentDaemonSet); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: "vitastor-agent", Namespace: vitastorCluster.Spec.VitastorClusterNamespace}, agentDaemonSet); err != nil {
 		if errors.IsNotFound(err) {
-			// Daemonset is not found - creating new one
 			log.Info("Daemonset is not found, creating new one")
 			ds, err := r.getAgentConfiguration(&vitastorCluster)
 			if err != nil {
@@ -166,7 +201,7 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				return ctrl.Result{}, err
 			}
 			if err := r.Create(ctx, ds); err != nil {
-				log.Error(err, "Failed to create new Daemonset")
+				log.Error(err, "Failed to create new agent Daemonset")
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{RequeueAfter: time.Duration(5) * time.Minute}, nil
@@ -174,39 +209,60 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Error(err, "Failed to fetch agent daemonset")
 		return ctrl.Result{}, err
 	}
-
-	// Check agent image
-	if agentDaemonSet.Spec.Template.Spec.Containers[0].Image != vitastorCluster.Spec.AgentImage {
+	// Image
+	if agentDaemonSet.Spec.Template.Spec.Containers[0].Image != vitastorCluster.Spec.Agent.Image {
 		log.Info("Agent image mismatch")
-		agentDaemonSet.Spec.Template.Spec.Containers[0].Image = vitastorCluster.Spec.AgentImage
+		agentDaemonSet.Spec.Template.Spec.Containers[0].Image = vitastorCluster.Spec.Agent.Image
 		if err := r.Update(ctx, agentDaemonSet); err != nil {
-			log.Error(err, "Failed to update agent daemonset")
+			log.Error(err, "Failed to update agent daemonset image")
+			return ctrl.Result{}, err
+		}
+	}
+	// Resources
+	if !reflect.DeepEqual(agentDaemonSet.Spec.Template.Spec.Resources, &vitastorCluster.Spec.Agent.Resources) {
+		log.Info("resources of agent daemonset differs, updating")
+		agentDaemonSet.Spec.Template.Spec.Resources = &vitastorCluster.Spec.Agent.Resources
+		if err := r.Update(ctx, agentDaemonSet); err != nil {
+			log.Error(err, "Failed to update agent daemonset during resource requirement change")
+			return ctrl.Result{}, err
+		}
+	}
+	// Node label
+	if !reflect.DeepEqual(agentDaemonSet.Spec.Template.Spec.NodeSelector, map[string]string{vitastorCluster.Spec.VitastorNodeLabel: "true"}) {
+		log.Info("NodeSelector label of agent daemonset differs, updating")
+		agentDaemonSet.Spec.Template.Spec.NodeSelector = map[string]string{vitastorCluster.Spec.VitastorNodeLabel: "true"}
+		if err := r.Update(ctx, agentDaemonSet); err != nil {
+			log.Error(err, "Failed to update agent daemonset during NodeSelector label change")
 			return ctrl.Result{}, err
 		}
 	}
 
-	agentList := &corev1.PodList{}
+	// ===
+	// VitastorNode
+	// ===
+	nodeList := &corev1.NodeList{}
 	getOpts := []client.ListOption{
-		client.InNamespace(namespace),
-		client.MatchingLabels{"app": "vitastor-agent"},
+		client.MatchingLabels{
+			vitastorCluster.Spec.VitastorNodeLabel: "true",
+		},
 	}
-	log.Info("Fetching agents...")
-	if err := r.List(ctx, agentList, getOpts...); err != nil {
-		log.Error(err, "unable to fetch Vitastor agents")
+	log.Info("Fetching nodes...")
+	if err := r.List(ctx, nodeList, getOpts...); err != nil {
+		log.Error(err, "unable to fetch Vitastor nodes")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	for _, agent := range agentList.Items {
-		vitastorNode := &controlv1.VitastorNode{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: agent.Spec.NodeName}, vitastorNode); err != nil {
+	for _, node := range nodeList.Items {
+		vitastorNode := &controlv2.VitastorNode{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: node.Name}, vitastorNode); err != nil {
 			if errors.IsNotFound(err) {
 				// VitastorNode CRD for that node is not found - creating new one
-				log.Error(err, "VitastorNode CRD is not found, creating new one", "NodeName", agent.Spec.NodeName)
-				newVitastorNode, err := r.getVitastorNodeConfiguration(agent.Spec.NodeName, vitastorCluster.Spec.OSDImage)
+				log.Error(err, "VitastorNode CRD is not found, creating new one with default parameters", "NodeName", node.Name)
+				newVitastorNode, err := r.getVitastorNodeConfiguration(node.Name, vitastorCluster.Name)
 				if err != nil {
 					log.Error(err, "Unable to get vitastorNode configuration")
 					return ctrl.Result{}, err
 				}
-				log.Info("Created new VitastorNode CRD", "VitastorNode.name", newVitastorNode.Name, "VitastorNode.Spec.NodeName", newVitastorNode.Spec.NodeName)
+				log.Info("Created new VitastorNode CRD", "VitastorNode.name", newVitastorNode.Name)
 				if err := controllerutil.SetControllerReference(&vitastorCluster, newVitastorNode, r.Scheme); err != nil {
 					log.Error(err, "Failed to set owner for vitastorNode CRD")
 					return ctrl.Result{}, err
@@ -222,30 +278,32 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string, image string) (*controlv1.VitastorNode, error) {
-	vitastorNode := &controlv1.VitastorNode{
+func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string, clusterName string) (*controlv2.VitastorNode, error) {
+	vitastorNode := &controlv2.VitastorNode{
 		ObjectMeta: ctrl.ObjectMeta{
 			Name: nodeName,
+			Labels: map[string]string{
+				"control.vitastor.io/cluster": clusterName,
+			},
 		},
-		Spec: controlv1.VitastorNodeSpec{
-			NodeName: nodeName,
-			OSDImage: image,
+		Spec: controlv2.VitastorNodeSpec{
+			NoOut:  false,
+			Weight: "1.0",
 		},
 	}
 	return vitastorNode, nil
 }
 
-func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.VitastorCluster) (*appsv1.Deployment, error) {
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
+func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv2.VitastorCluster) (*appsv1.Deployment, error) {
+	monitorReplicas := int32(cluster.Spec.Monitor.Replicas)
+	labels := map[string]string{
+		"control.vitastor.io/app":     "vitastor-monitor",
+		"control.vitastor.io/cluster": cluster.Name,
 	}
-	monitorReplicas := int32(cluster.Spec.MonitorReplicaNum)
-	labels := map[string]string{"app": "vitastor-monitor"}
 
 	depl := appsv1.Deployment{
 		ObjectMeta: ctrl.ObjectMeta{
-			Namespace: namespace,
+			Namespace: cluster.Spec.VitastorClusterNamespace,
 			Name:      "vitastor-monitor",
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -260,14 +318,9 @@ func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.V
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "vitastor-monitor",
-							Image: cluster.Spec.MonitorImage,
-							Resources: corev1.ResourceRequirements{
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("1000m"),
-									corev1.ResourceMemory: resource.MustParse("1024Mi"),
-								},
-							},
+							Name:      "vitastor-monitor",
+							Image:     cluster.Spec.Monitor.Image,
+							Resources: cluster.Spec.Monitor.Resources,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "vitastor-config",
@@ -300,18 +353,17 @@ func (r *VitastorClusterReconciler) getMonitorConfiguration(cluster *controlv1.V
 	return &depl, nil
 }
 
-func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv1.VitastorCluster) (*appsv1.DaemonSet, error) {
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
-	}
+func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv2.VitastorCluster) (*appsv1.DaemonSet, error) {
 	privilegedContainer := true
-	dsLabels := map[string]string{"app": "vitastor-agent"}
+	dsLabels := map[string]string{
+		"control.vitastor.io/app":     "vitastor-agent",
+		"control.vitastor.io/cluster": cluster.Name,
+	}
 	nodeLabels := map[string]string{cluster.Spec.VitastorNodeLabel: "true"}
 
 	ds := appsv1.DaemonSet{
 		ObjectMeta: ctrl.ObjectMeta{
-			Namespace: namespace,
+			Namespace: cluster.Spec.VitastorClusterNamespace,
 			Name:      "vitastor-agent",
 		},
 		Spec: appsv1.DaemonSetSpec{
@@ -327,17 +379,12 @@ func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv1.Vit
 					Containers: []corev1.Container{
 						{
 							Name:  "vitastor-agent",
-							Image: cluster.Spec.AgentImage,
+							Image: cluster.Spec.Agent.Image,
 							SecurityContext: &corev1.SecurityContext{
 								Privileged: &privilegedContainer,
 							},
-							Resources: corev1.ResourceRequirements{
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("1000m"),
-									corev1.ResourceMemory: resource.MustParse("1024Mi"),
-								},
-							},
-							Ports: []corev1.ContainerPort{{ContainerPort: 8000}},
+							Resources: cluster.Spec.Agent.Resources,
+							Ports:     []corev1.ContainerPort{{ContainerPort: 8000}},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "vitastor-config",

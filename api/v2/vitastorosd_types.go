@@ -31,7 +31,7 @@ type VitastorOSDSpec struct {
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 	DiskRef string `json:"diskRef"`
 	Tags []string `json:"tags"`
-	Weight float32 `json:"weight"`
+	Weight string `json:"weight"`
 	NoOut bool `json:"noout"`
 	Path string `json:"path"`
 }
@@ -57,10 +57,13 @@ type VitastorOSDStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Id int32 `json:"id"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
+// +kubebuilder:resource:scope=Cluster
 
 // VitastorOSD is the Schema for the vitastorosds API
 type VitastorOSD struct {

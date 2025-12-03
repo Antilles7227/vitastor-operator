@@ -30,6 +30,7 @@ rules:
   - control.vitastor.io
   resources:
   - vitastorclusters
+  - vitastordisks
   - vitastornodes
   - vitastorosds
   - vitastorpools
@@ -45,6 +46,7 @@ rules:
   - control.vitastor.io
   resources:
   - vitastorclusters/finalizers
+  - vitastordisks/finalizers
   - vitastornodes/finalizers
   - vitastorosds/finalizers
   - vitastorpools/finalizers
@@ -54,6 +56,7 @@ rules:
   - control.vitastor.io
   resources:
   - vitastorclusters/status
+  - vitastordisks/status
   - vitastornodes/status
   - vitastorosds/status
   - vitastorpools/status

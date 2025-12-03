@@ -73,12 +73,14 @@ type VitastorPoolStatus struct {
 	Total	int64 `json:"totalBytes"`
 	Used int64 `json:"usedBytes"`
 	Available int64 `json:"availableBytes"`
-	UsedPercent float64 `json:"usedPercent"`
-	Efficiency float64 `json:"efficiency"`
+	UsedPercent string `json:"usedPercent"`
+	Efficiency string `json:"efficiency"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
+// +kubebuilder:resource:scope=Cluster
 
 // VitastorPool is the Schema for the vitastorpools API
 type VitastorPool struct {

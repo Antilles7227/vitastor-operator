@@ -25,9 +25,15 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type MonitorSpec struct {
-	Image     string                      `json:"image"`
-	Replicas  int32                       `json:"replicas"`
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	Image                 string                      `json:"image"`
+	Replicas              int32                       `json:"replicas"`
+	Resources             corev1.ResourceRequirements `json:"resources,omitempty"`
+	EtcdMonTtlSecs        int32                       `json:"etcdMonTtlSecs,omitempty"`
+	EtcdMonTimeoutMsecs   int32                       `json:"etcdMonTimeoutMsecs,omitempty"`
+	EtcdMonRetries        int32                       `json:"etcdMonRetries,omitempty"`
+	MonChangeTimeoutMsecs int32                       `json:"monChangeTimeoutMsecs,omitempty"`
+	MonStatsTimeoutMsecs  int32                       `json:"monStatsTimeoutMsecs,omitempty"`
+	OsdOutTimeSecs        int32                       `json:"osdOutTimeSecs,omitempty"`
 }
 
 type AgentSpec struct {
@@ -44,28 +50,39 @@ type OSDSpec struct {
 	AutosyncWrites         int32                       `json:"autosyncWrites,omitempty"`
 	RecoveryQueueDepth     int32                       `json:"recoveryQueueDepth,omitempty"`
 	RecoverySleepUs        int32                       `json:"recoverySleepUs,omitempty"`
-	RecoveryPGSwitch       int32                         `json:"recoveryPgSwitch,omitempty"`  // number of PGs to recover at once
-	RecoverySyncBatch      int32                         `json:"recoverySyncBatch,omitempty"` // batch size for sync
-	NoRecovery             bool                        `json:"noRecovery,omitempty"`        // disable recovery
-	NoRebalance            bool                        `json:"noRebalance,omitempty"`       // disable automatic rebalancing
+	RecoveryPGSwitch       int32                       `json:"recoveryPgSwitch,omitempty"`
+	RecoverySyncBatch      int32                       `json:"recoverySyncBatch,omitempty"`
+	NoRecovery             bool                        `json:"noRecovery,omitempty"`
+	NoRebalance            bool                        `json:"noRebalance,omitempty"`
 
-	PrintStatsIntervalSecs int32 `json:"printStatsIntervalSecs,omitempty"` // e.g., "10s", "1m"
-	SlowLogIntervalSecs    int32 `json:"slowLogIntervalSecs,omitempty"`    // interval to print slow ops
+	PrintStatsIntervalSecs int32 `json:"printStatsIntervalSecs,omitempty"`
+	SlowLogIntervalSecs    int32 `json:"slowLogIntervalSecs,omitempty"`
 
-	AutoScrub            bool   `json:"autoScrub,omitempty"`     // enable automatic scrubbing
-	NoScrub              bool   `json:"noScrub,omitempty"`       // disable scrubbing
-	ScrubInterval        string `json:"scrubInterval,omitempty"` // e.g., "24h"
-	ScrubQueueDepth      int    `json:"scrubQueueDepth,omitempty"`
-	ScrubSleep           string `json:"scrubSleep,omitempty"` // duration per scrub batch
+	AutoScrub            bool   `json:"autoScrub,omitempty"`
+	NoScrub              bool   `json:"noScrub,omitempty"`
+	ScrubInterval        string `json:"scrubInterval,omitempty"`
+	ScrubQueueDepth      int32  `json:"scrubQueueDepth,omitempty"`
+	ScrubSleepMsec       int32  `json:"scrubSleepMsec,omitempty"`
 	ScrubListLimit       int    `json:"scrubListLimit,omitempty"`
 	ScrubFindBest        bool   `json:"scrubFindBest,omitempty"`
-	ScrubECMaxBruteforce int    `json:"scrubEcMaxBruteforce,omitempty"`
+	ScrubECMaxBruteforce int32  `json:"scrubEcMaxBruteforce,omitempty"`
 
-	RecoveryTuneInterval string `json:"recoveryTuneInterval,omitempty"`
-	RecoveryTuneUtilLow  int    `json:"recoveryTuneUtilLow,omitempty"`  // % CPU below which tune down
-	RecoveryTuneUtilHigh int    `json:"recoveryTuneUtilHigh,omitempty"` // % CPU above which tune up
+	RecoveryTuneIntervalSecs int32  `json:"recoveryTuneIntervalSecs,omitempty"`
+	RecoveryTuneUtilLow      string `json:"recoveryTuneUtilLow,omitempty"`
+	RecoveryTuneUtilHigh     string `json:"recoveryTuneUtilHigh,omitempty"`
+
+	DisableMetaFsync    bool `json:"disableMetaFsync"`
+	DisableJournalFsync bool `json:"disableJournalFsync"`
+	DisableDataFsync    bool `json:"disableDataFsync"`
 }
-type ClusterParameters struct{}
+type ClusterParameters struct {
+	OsdBackfillRatio string           `json:"osdBackfillRatio,omitempty"`
+	PlacementLevels  map[string]int32 `json:"placementLevels,omitempty"`
+	ImmediateCommit  ImmediateCommit  `json:"immediateCommit,omitempty"`
+}
+
+// +kubebuilder:validation:Enum=none;small;all
+type ImmediateCommit string
 
 // VitastorClusterSpec defines the desired state of VitastorCluster
 type VitastorClusterSpec struct {
@@ -74,12 +91,13 @@ type VitastorClusterSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	VitastorNodeLabel string
-	Agent             AgentSpec         `json:"agent"`
-	Monitor           MonitorSpec       `json:"monitor"`
-	OSD               OSDSpec           `json:"osd"`
-	ReconcilePeriod   int               `json:"reconcilePeriod"`
-	ClusterParameters ClusterParameters `json:"cluster"`
+	VitastorNodeLabel        string            `json:"vitastorNodeLabel"`
+	VitastorClusterNamespace string            `json:"vitastorClusterNamespace,omitempty"`
+	Agent                    AgentSpec         `json:"agent"`
+	Monitor                  MonitorSpec       `json:"monitor"`
+	OSD                      OSDSpec           `json:"osd"`
+	ReconcilePeriodMin       int               `json:"reconcilePeriodMin"`
+	ClusterParameters        ClusterParameters `json:"cluster"`
 }
 
 // VitastorClusterStatus defines the observed state of VitastorCluster.
@@ -107,6 +125,8 @@ type VitastorClusterStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
+// +kubebuilder:resource:scope=Cluster
 
 // VitastorCluster is the Schema for the vitastorclusters API
 type VitastorCluster struct {

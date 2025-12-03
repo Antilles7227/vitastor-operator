@@ -29,8 +29,11 @@ type VitastorDiskSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	type:
+	
+	DevicePath string `json:"devicePath"`
+	DesiredOSDCount int32 `json:"desiredOSDCount,omitempty"`
+	DesiredState string `json:"desiredState,omitempty"`
+	NodeRef string `json:"nodeRef"`
 }
 
 // VitastorDiskStatus defines the observed state of VitastorDisk.
@@ -54,10 +57,17 @@ type VitastorDiskStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	State string `json:"state"`
+	Type DiskType `json:"type"`
+	Size int64 `json:"size"`
 }
+
+// +kubebuilder:validation:Enum=OSD;System;Empty;Unknown
+type DiskType string
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
 
 // VitastorDisk is the Schema for the vitastordisks API
 type VitastorDisk struct {

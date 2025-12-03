@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 // VitastorNodeReconciler reconciles a VitastorNode object
@@ -91,6 +92,26 @@ type VitastorNodePlacement struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var log = log.FromContext(ctx)
+	// ===
+	// Preparations, getting cluster CR, node CR, connect to Vitastor etcd, checking namespace for resources
+	// ===
+	var vitastorNode controlv2.VitastorNode
+	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorNode); err != nil {
+		log.Error(err, "unable to fetch VitastorNode, skipping")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	var ownerCluster controlv2.VitastorCluster
+	for _, ownerRef := range vitastorNode.OwnerReferences {
+        if ownerRef.Kind == "VitastorCluster" && ownerRef.APIVersion == "control.vitastor.io/v2" {
+            log.Info("found owner VitastorCluster", "APIVersion", ownerRef.APIVersion, "name", ownerRef.Name)
+            if err := r.Client.Get(ctx, types.NamespacedName{Name: ownerRef.Name, Namespace: corev1.NamespaceAll}, &ownerCluster); err != nil {
+				log.Error(err, "unable to fetch owner VitastorCluster")
+				return ctrl.Result{}, err
+			}
+            break
+        }
+    }
 	config, err := loadConfiguration(ctx, "/etc/vitastor/vitastor.conf")
 	if err != nil {
 		log.Error(err, "Unable to load vitastor.conf")
@@ -105,25 +126,12 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 	defer cli.Close()
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
-	}
-	updateIntervalRaw, isEmpty := os.LookupEnv("UPDATE_INTERVAL")
-	if !isEmpty {
-		updateIntervalRaw = "15"
-	}
-	updateInterval, err := strconv.Atoi(updateIntervalRaw)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	placementLevelsStatic := []string{"dc"} // TODO: that list should be inside VitastorCluster CRD
+	
 
-	var vitastorNode controlv1.VitastorNode
-	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorNode); err != nil {
-		log.Error(err, "unable to fetch VitastorNode, skipping")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
+	placementLevelCluster := make([]string, 0, len(ownerCluster.Spec.ClusterParameters.PlacementLevels))
+    for k := range ownerCluster.Spec.ClusterParameters.PlacementLevels {
+        placementLevelCluster = append(placementLevelCluster, k)
+    }
 
 	var k8sNode corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &k8sNode); err != nil {
@@ -154,12 +162,12 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	for label, value := range k8sNode.Labels {
 		if strings.Contains(label, "fd.vitastor.io") {
 			splittedLabel := strings.Split(label, "/")
-			if contains_str_list(placementLevelsStatic, splittedLabel[1]) {
+			if contains_str_list(placementLevelCluster, splittedLabel[1]) {
 				// Node labeled properly, check if that label exist in placements
 				_, ok := placementLevel[value]
 				// If the key not exists
 				if !ok {
-					placementLevel[value] = VitastorNodePlacement{Level: "dc"}
+					placementLevel[value] = VitastorNodePlacement{Level: splittedLabel[1]}
 				}
 				// Updating placement level with proper parent
 				placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host", Parent: value}
@@ -181,10 +189,9 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log.Info(placementLevelResp.Header.String())
 
 	// Update status with OSDs
-	var nodeStatusUpdated bool = false
 	agentList := &corev1.PodList{}
 	getOpts := []client.ListOption{
-		client.InNamespace(namespace),
+		client.InNamespace(ownerCluster.Spec.VitastorClusterNamespace),
 		client.MatchingLabels{"app": "vitastor-agent"},
 		client.MatchingFields{".spec.node": vitastorNode.Name},
 	}
@@ -195,12 +202,10 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	if len(agentList.Items) == 0 {
 		log.Info("Seems like that agent Pod is not running, reschedule reconciling...")
-		return ctrl.Result{RequeueAfter: time.Duration(updateInterval) * time.Minute}, nil
+		return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, nil
 	}
 	agentIP := agentList.Items[0].Status.PodIP
 	systemDisksURL := "http://" + agentIP + ":8000/disk"
-	emptyDisksURL := systemDisksURL + "/empty"
-	osdURL := systemDisksURL + "/osd"
 
 	// Getting all disks on that node
 	resp, err := http.Get(systemDisksURL)
@@ -220,83 +225,21 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	for _, disk := range systemDisks {
 		systemDisksPaths = append(systemDisksPaths, disk.Name)
 	}
-	if !compareArrays(systemDisksPaths, vitastorNode.Status.Disks) {
-		log.Info("Status of system disks is not actual, updating")
-		vitastorNode.Status.Disks = systemDisksPaths
-		nodeStatusUpdated = true
-	}
 
-	// Getting empty disks on that node
-	resp, err = http.Get(emptyDisksURL)
-	if err != nil {
-		log.Error(err, "Unable to get empty disks")
-		return ctrl.Result{}, err
-	}
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		log.Error(err, "Unable to read body of response")
-		return ctrl.Result{}, err
-	}
-	var emptyDisks []SystemDisk
-	json.Unmarshal(body, &emptyDisks)
-	resp.Body.Close()
-	var emptyDisksPaths []string = make([]string, len(emptyDisks))
-	for _, disk := range emptyDisks {
-		emptyDisksPaths = append(emptyDisksPaths, disk.Name)
-	}
-	if !compareArrays(emptyDisksPaths, vitastorNode.Status.EmptyDisks) {
-		log.Info("Status of empty disks is not actual, updating")
-		vitastorNode.Status.EmptyDisks = emptyDisksPaths
-		nodeStatusUpdated = true
-	}
-
-	// Getting OSD on that node
-	resp, err = http.Get(osdURL)
-	if err != nil {
-		log.Error(err, "Unable to get OSDs")
-		return ctrl.Result{}, err
-	}
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		log.Error(err, "Unable to read body of response")
-		return ctrl.Result{}, err
-	}
-	var osds []OSDPartition
-	json.Unmarshal(body, &osds)
-	resp.Body.Close()
-	var osdPaths []string = make([]string, len(osds))
-	for _, disk := range osds {
-		osdPaths = append(osdPaths, disk.DataDevice)
-	}
-	if !compareArrays(osdPaths, vitastorNode.Status.VitastorDisks) {
-		log.Info("Status of OSDs is not actual, updating")
-		vitastorNode.Status.VitastorDisks = osdPaths
-		nodeStatusUpdated = true
-	}
-
-	if nodeStatusUpdated {
-		log.Info("Updating node status")
-		err := r.Status().Update(ctx, &vitastorNode)
-		if err != nil {
-			log.Error(err, "Unable to update status of vitastorNode")
-			return ctrl.Result{}, err
-		}
-	}
-
-	log.Info("Fetching OSDs for that Node")
-	osdList := &controlv1.VitastorOSDList{}
+	log.Info("Fetching Disks for that Node")
+	diskList := &controlv2.VitastorDiskList{}
 	listOpts := []client.ListOption{
-		client.MatchingFields{".spec.nodeName": vitastorNode.Name},
+		client.MatchingFields{".spec.nodeRef": vitastorNode.Name},
 	}
-	if err := r.List(ctx, osdList, listOpts...); err != nil {
-		log.Error(err, "Unable to list OSDs")
+	if err := r.List(ctx, diskList, listOpts...); err != nil {
+		log.Error(err, "Unable to list disks")
 		return ctrl.Result{}, err
 	}
 
-	// Checking existing VitastorOSD for creating new OSDs
-	log.Info("Checking existing VitastorOSD for creating new OSDs")
-	for _, osd := range osds {
-		if contains(osdList.Items, osd.DataDevice) {
+	// Checking existing VitastorDisk for creating new Disk CRs
+	log.Info("Checking existing VitastorDisk for creating new Disk CRs")
+	for _, disk := range systemDisks {
+		if contains(diskList.Items, disk.DevicePath) {
 			// That disk already working in cluster, updating node placement and skip
 			// Check node placement and set if empty
 			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
@@ -388,12 +331,12 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			err := r.Delete(ctx, &osd)
 			if err != nil {
 				log.Error(err, "Failed to delete OSD")
-				return ctrl.Result{RequeueAfter: time.Duration(updateInterval) * time.Minute}, err
+				return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, err
 			}
 		}
 	}
 	log.Info("Reconciling is done")
-	return ctrl.Result{RequeueAfter: time.Duration(updateInterval) * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, nil
 }
 
 func compareArrays(x, y []string) bool {
@@ -401,9 +344,9 @@ func compareArrays(x, y []string) bool {
 	return cmp.Equal(x, y, cmpopts.SortSlices(less))
 }
 
-func contains(s []controlv1.VitastorOSD, str string) bool {
+func contains(s []controlv2.VitastorDisk, str string) bool {
 	for _, v := range s {
-		if v.Spec.OSDPath == str {
+		if v.Spec.DevicePath == str {
 			return true
 		}
 	}
@@ -417,6 +360,21 @@ func contains_str_list(s []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func (r *VitastorNodeReconciler) getDiskConfiguration(osdPath string, osdNumber int, node *controlv1.VitastorNode) *controlv2.VitastorDisk {
+	disk := &controlv1.VitastorDisk{
+		ObjectMeta: ctrl.ObjectMeta{
+			Name: "vitastor-osd-" + strconv.Itoa(osdNumber),
+		},
+		Spec: controlv1.VitastorOSDSpec{
+			NodeName:  node.Spec.NodeName,
+			OSDPath:   osdPath,
+			OSDNumber: osdNumber,
+			OSDImage:  node.Spec.OSDImage,
+		},
+	}
+	return disk
 }
 
 func (r *VitastorNodeReconciler) getConfiguration(osdPath string, osdNumber int, node *controlv1.VitastorNode) *controlv1.VitastorOSD {

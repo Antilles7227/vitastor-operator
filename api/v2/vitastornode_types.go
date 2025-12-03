@@ -31,7 +31,7 @@ type VitastorNodeSpec struct {
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
 	NoOut bool `json:"noout"`
-	Weight float32 `json:"weight"`
+	Weight string `json:"weight"`
 }
 
 // VitastorNodeStatus defines the observed state of VitastorNode.
@@ -59,6 +59,8 @@ type VitastorNodeStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
+// +kubebuilder:resource:scope=Cluster
 
 // VitastorNode is the Schema for the vitastornodes API
 type VitastorNode struct {

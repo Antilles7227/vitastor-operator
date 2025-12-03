@@ -4,76 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: vitastorosds.control.vitastor.io
+  name: vitastordisks.control.vitastor.io
 spec:
   group: control.vitastor.io
   names:
-    kind: VitastorOSD
-    listKind: VitastorOSDList
-    plural: vitastorosds
-    singular: vitastorosd
+    kind: VitastorDisk
+    listKind: VitastorDiskList
+    plural: vitastordisks
+    singular: vitastordisk
   scope: Cluster
   versions:
-  - name: v1
-    schema:
-      openAPIV3Schema:
-        description: VitastorOSD is the Schema for the vitastorosds API
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: spec defines the desired state of VitastorOSD
-            properties:
-              nodeName:
-                description: Name of node
-                type: string
-              osdImage:
-                description: OSD container image
-                type: string
-              osdNumber:
-                description: Number allocated to OSD
-                type: integer
-              osdPath:
-                description: Path to OSD disk (i.e. /dev/disk/by-partuuid/<...>)
-                type: string
-              osdTags:
-                description: // Tags that applied to OSD (divided by comma, i.e. "hostN,nvme,dcN")
-                type: string
-            required:
-            - nodeName
-            - osdImage
-            - osdNumber
-            - osdPath
-            type: object
-          status:
-            description: status defines the observed state of VitastorOSD
-            type: object
-        required:
-        - spec
-        type: object
-    served: true
-    storage: false
-    subresources:
-      status: {}
   - name: v2
     schema:
       openAPIV3Schema:
-        description: VitastorOSD is the Schema for the vitastorosds API
+        description: VitastorDisk is the Schema for the vitastordisks API
         properties:
           apiVersion:
             description: |-
@@ -93,38 +37,27 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of VitastorOSD
+            description: spec defines the desired state of VitastorDisk
             properties:
-              diskRef:
-                description: |-
-                  INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-                  Important: Run "make" to regenerate code after modifying this file
-                  The following markers will use OpenAPI v3 schema to validate the value
-                  More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+              desiredOSDCount:
+                format: int32
+                type: integer
+              desiredState:
                 type: string
-              noout:
-                type: boolean
-              path:
+              devicePath:
                 type: string
-              tags:
-                items:
-                  type: string
-                type: array
-              weight:
+              nodeRef:
                 type: string
             required:
-            - diskRef
-            - noout
-            - path
-            - tags
-            - weight
+            - devicePath
+            - nodeRef
             type: object
           status:
-            description: status defines the observed state of VitastorOSD
+            description: status defines the observed state of VitastorDisk
             properties:
               conditions:
                 description: |-
-                  conditions represent the current state of the VitastorOSD resource.
+                  conditions represent the current state of the VitastorDisk resource.
                   Each condition has a unique type and reflects the status of a specific aspect of the resource.
 
                   Standard condition types include:
@@ -191,11 +124,22 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              id:
-                format: int32
+              size:
+                format: int64
                 type: integer
+              state:
+                type: string
+              type:
+                enum:
+                - OSD
+                - System
+                - Empty
+                - Unknown
+                type: string
             required:
-            - id
+            - size
+            - state
+            - type
             type: object
         required:
         - spec
