@@ -29,11 +29,11 @@ type VitastorOSDSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-	DiskRef string `json:"diskRef"`
-	Tags []string `json:"tags"`
-	Weight string `json:"weight"`
-	NoOut bool `json:"noout"`
-	Path string `json:"path"`
+	DiskRef string   `json:"diskRef"`
+	Tags    []string `json:"tags"`
+	Weight  string   `json:"weight"`
+	NoOut   bool     `json:"noout"`
+	Path    string   `json:"path"`
 }
 
 // VitastorOSDStatus defines the observed state of VitastorOSD.
@@ -57,7 +57,7 @@ type VitastorOSDStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	Id int32 `json:"id"`
+	Id         int32              `json:"id"`
 }
 
 // +kubebuilder:object:root=true

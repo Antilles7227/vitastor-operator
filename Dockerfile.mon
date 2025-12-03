@@ -1,0 +1,3 @@
+FROM antilles/vitastor-osd:1.5.0
+
+ENTRYPOINT ["node", "/usr/lib/vitastor/mon/mon-main.js"]

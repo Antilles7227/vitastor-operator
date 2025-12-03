@@ -103,15 +103,15 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	var ownerCluster controlv2.VitastorCluster
 	for _, ownerRef := range vitastorNode.OwnerReferences {
-        if ownerRef.Kind == "VitastorCluster" && ownerRef.APIVersion == "control.vitastor.io/v2" {
-            log.Info("found owner VitastorCluster", "APIVersion", ownerRef.APIVersion, "name", ownerRef.Name)
-            if err := r.Client.Get(ctx, types.NamespacedName{Name: ownerRef.Name, Namespace: corev1.NamespaceAll}, &ownerCluster); err != nil {
+		if ownerRef.Kind == "VitastorCluster" && ownerRef.APIVersion == "control.vitastor.io/v2" {
+			log.Info("found owner VitastorCluster", "APIVersion", ownerRef.APIVersion, "name", ownerRef.Name)
+			if err := r.Client.Get(ctx, types.NamespacedName{Name: ownerRef.Name, Namespace: corev1.NamespaceAll}, &ownerCluster); err != nil {
 				log.Error(err, "unable to fetch owner VitastorCluster")
 				return ctrl.Result{}, err
 			}
-            break
-        }
-    }
+			break
+		}
+	}
 	config, err := loadConfiguration(ctx, "/etc/vitastor/vitastor.conf")
 	if err != nil {
 		log.Error(err, "Unable to load vitastor.conf")
@@ -126,12 +126,11 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 	defer cli.Close()
-	
 
 	placementLevelCluster := make([]string, 0, len(ownerCluster.Spec.ClusterParameters.PlacementLevels))
-    for k := range ownerCluster.Spec.ClusterParameters.PlacementLevels {
-        placementLevelCluster = append(placementLevelCluster, k)
-    }
+	for k := range ownerCluster.Spec.ClusterParameters.PlacementLevels {
+		placementLevelCluster = append(placementLevelCluster, k)
+	}
 
 	var k8sNode corev1.Node
 	if err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &k8sNode); err != nil {
@@ -239,7 +238,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Checking existing VitastorDisk for creating new Disk CRs
 	log.Info("Checking existing VitastorDisk for creating new Disk CRs")
 	for _, disk := range systemDisks {
-		if contains(diskList.Items, disk.DevicePath) {
+		if contains(diskList.Items, disk.Name) {
 			// That disk already working in cluster, updating node placement and skip
 			// Check node placement and set if empty
 			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
@@ -253,7 +252,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				log.Error(err, "Unable to parse placement level block")
 				return ctrl.Result{}, err
 			}
-			placementLevel[strconv.Itoa(osd.OSDNumber)] = VitastorNodePlacement{Level: "osd", Parent: vitastorNode.Spec.NodeName}
+			placementLevel[vitastorNode.Name+"_"+strings.Trim("/dev/", disk.Name)] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
 			var placementLevelBytes []byte
 			placementLevelBytes, err = json.Marshal(placementLevel)
 			if err != nil {
@@ -268,14 +267,14 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			log.Info(placementLevelResp.Header.String())
 			continue
 		} else {
-			// OSD for that disk not deployed, need to create CRD
-			new_osd := r.getConfiguration(osd.DataDevice, osd.OSDNumber, &vitastorNode)
-			if err := controllerutil.SetControllerReference(&vitastorNode, new_osd, r.Scheme); err != nil {
+			// Disk not deployed, need to create CRD
+			new_disk := r.getDiskConfiguration(disk.Name, &vitastorNode)
+			if err := controllerutil.SetControllerReference(&vitastorNode, new_disk, r.Scheme); err != nil {
 				log.Error(err, "Failed to set owner for osd")
 				return ctrl.Result{}, err
 			}
-			log.Info("Deploying new OSD", "osdName", new_osd.Name)
-			err := r.Create(ctx, new_osd)
+			log.Info("Deploying new Disk", "diskName", new_disk.Name)
+			err := r.Create(ctx, new_disk)
 			if err != nil {
 				log.Error(err, "Failed to create new OSD")
 				return ctrl.Result{}, err
@@ -293,7 +292,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				log.Error(err, "Unable to parse placement level block")
 				return ctrl.Result{}, err
 			}
-			placementLevel[strconv.Itoa(new_osd.Spec.OSDNumber)] = VitastorNodePlacement{Level: "osd", Parent: vitastorNode.Spec.NodeName}
+			placementLevel[new_disk.Name] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
 			var placementLevelBytes []byte
 			placementLevelBytes, err = json.Marshal(placementLevel)
 			if err != nil {
@@ -309,28 +308,44 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// Checking existing VitastorOSD for deleting disabled OSD
-	log.Info("Checking existing VitastorOSD for deleting disabled OSDs")
-	for _, osd := range osdList.Items {
-		if contains_str_list(osdPaths, osd.Spec.OSDPath) {
-			// That disk still working in cluster, checking image
-			if osd.Spec.OSDImage != vitastorNode.Spec.OSDImage {
-				log.Info("Updating OSD image", "osdName", osd.Name, "oldImage", osd.Spec.OSDImage, "newImage", vitastorNode.Spec.OSDImage)
-				osd.Spec.OSDImage = vitastorNode.Spec.OSDImage
-				if err := r.Update(ctx, &osd); err != nil {
-					log.Error(err, "Failed to update OSD object")
-					return ctrl.Result{}, err
-				}
-				log.Info("Updated OSD image, waiting for changes to apply", "osdName", osd.Name, "image", osd.Spec.OSDImage)
-				return ctrl.Result{RequeueAfter: time.Duration(3) * time.Minute}, nil // TODO: make parametrized sync duration, 3 minutes seems to be okay for beginning
-			}
+	// Checking existing VitastorDisks for deleting disabled Disks
+	log.Info("Checking existing VitastorDisks for deleting disabled Disks")
+	for _, disk := range diskList.Items {
+		if contains_str_list(systemDisksPaths, disk.Spec.DevicePath) {
+			// That disk still working in cluster, skip
 			continue
 		} else {
-			// OSD for that disk disappeared, deleting OSD
-			log.Info("Deleting OSD...", "osdName", osd.Name)
-			err := r.Delete(ctx, &osd)
+			// Disk disappeared, deleting CR and updating node placement
+			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
 			if err != nil {
-				log.Error(err, "Failed to delete OSD")
+				log.Error(err, "Unable to retrieve placement tree")
+				return ctrl.Result{}, err
+			}
+			var placementLevel map[string]VitastorNodePlacement
+			err = json.Unmarshal(placementLevelRaw.Kvs[0].Value, &placementLevel)
+			if err != nil {
+				log.Error(err, "Unable to parse placement level block")
+				return ctrl.Result{}, err
+			}
+			delete(placementLevel, disk.Name)
+			var placementLevelBytes []byte
+			placementLevelBytes, err = json.Marshal(placementLevel)
+			if err != nil {
+				log.Error(err, "Unable to marshal placement level block")
+				return ctrl.Result{}, err
+			}
+			placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
+			if err != nil {
+				log.Error(err, "Unable to update placement level tree")
+				return ctrl.Result{}, err
+			}
+			log.Info(placementLevelResp.Header.String())
+
+			log.Info("Deleting Disk...", "diskName", disk.Name)
+
+			err = r.Delete(ctx, &disk)
+			if err != nil {
+				log.Error(err, "Failed to delete disk")
 				return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, err
 			}
 		}
@@ -344,9 +359,9 @@ func compareArrays(x, y []string) bool {
 	return cmp.Equal(x, y, cmpopts.SortSlices(less))
 }
 
-func contains(s []controlv2.VitastorDisk, str string) bool {
-	for _, v := range s {
-		if v.Spec.DevicePath == str {
+func contains(diskList []controlv2.VitastorDisk, diskName string) bool {
+	for _, v := range diskList {
+		if v.Spec.DevicePath == diskName {
 			return true
 		}
 	}
@@ -362,16 +377,14 @@ func contains_str_list(s []string, str string) bool {
 	return false
 }
 
-func (r *VitastorNodeReconciler) getDiskConfiguration(osdPath string, osdNumber int, node *controlv1.VitastorNode) *controlv2.VitastorDisk {
-	disk := &controlv1.VitastorDisk{
+func (r *VitastorNodeReconciler) getDiskConfiguration(diskPath string, node *controlv2.VitastorNode) *controlv2.VitastorDisk {
+	disk := &controlv2.VitastorDisk{
 		ObjectMeta: ctrl.ObjectMeta{
-			Name: "vitastor-osd-" + strconv.Itoa(osdNumber),
+			Name: node.Name + "_" + strings.Trim("/dev/", diskPath),
 		},
-		Spec: controlv1.VitastorOSDSpec{
-			NodeName:  node.Spec.NodeName,
-			OSDPath:   osdPath,
-			OSDNumber: osdNumber,
-			OSDImage:  node.Spec.OSDImage,
+		Spec: controlv2.VitastorDiskSpec{
+			NodeRef:    node.Name,
+			DevicePath: diskPath,
 		},
 	}
 	return disk

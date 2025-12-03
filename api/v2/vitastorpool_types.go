@@ -30,23 +30,23 @@ type VitastorPoolSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	Name                 string `json:"name"`
-	VitastorFS bool `json:"vitastorFS"`
+	Name               string `json:"name"`
+	VitastorFS         bool   `json:"vitastorFS"`
 	Scheme             string `json:"scheme"`
 	PGSize             int32  `json:"pgSize"`
 	ParityChunks       int32  `json:"parityChunks,omitempty"`
 	PGMinSize          int32  `json:"pgMinSize"`
 	PGCount            int32  `json:"pgCount"`
 	FailureDomain      string `json:"failureDomain"`
-	LevelPlacement		string `json:"levelPlacement"`
-	RawPlacement string `json:"rawPlacement"`
-	LocalReads string `json:"localReads"`
+	LevelPlacement     string `json:"levelPlacement"`
+	RawPlacement       string `json:"rawPlacement"`
+	LocalReads         string `json:"localReads"`
 	MaxOSDCombinations int32  `json:"maxOSDCombinations,omitempty"`
 	BlockSize          int32  `json:"blockSize,omitempty"`
-	BitmapGranularity int32 `json:"bitmapGranularity,omitempty"`
+	BitmapGranularity  int32  `json:"bitmapGranularity,omitempty"`
 	ImmediateCommit    string `json:"immediateCommit,omitempty"`
 	OSDTags            string `json:"osdTags,omitempty"`
-	ScrubInterval string `json:"scrubInterval,omitempty"`
+	ScrubInterval      string `json:"scrubInterval,omitempty"`
 }
 
 // VitastorPoolStatus defines the observed state of VitastorPool.
@@ -69,12 +69,12 @@ type VitastorPoolStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	Total	int64 `json:"totalBytes"`
-	Used int64 `json:"usedBytes"`
-	Available int64 `json:"availableBytes"`
-	UsedPercent string `json:"usedPercent"`
-	Efficiency string `json:"efficiency"`
+	Conditions  []metav1.Condition `json:"conditions,omitempty"`
+	Total       int64              `json:"totalBytes"`
+	Used        int64              `json:"usedBytes"`
+	Available   int64              `json:"availableBytes"`
+	UsedPercent string             `json:"usedPercent"`
+	Efficiency  string             `json:"efficiency"`
 }
 
 // +kubebuilder:object:root=true
