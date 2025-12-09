@@ -121,6 +121,8 @@ type VitastorClusterStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// Represents OSD that now is allowed to update
+	ActiveOSD  string             `json:"activeRollingOSD,omitempty"`
 }
 
 // +kubebuilder:object:root=true

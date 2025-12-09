@@ -95,25 +95,26 @@ spec:
           spec:
             description: spec defines the desired state of VitastorOSD
             properties:
-              diskRef:
-                description: |-
-                  INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-                  Important: Run "make" to regenerate code after modifying this file
-                  The following markers will use OpenAPI v3 schema to validate the value
-                  More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-                type: string
+              id:
+                format: int32
+                type: integer
               noout:
                 type: boolean
               path:
                 type: string
               tags:
+                description: |-
+                  INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                  The following markers will use OpenAPI v3 schema to validate the value
+                  More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
                 items:
                   type: string
                 type: array
               weight:
                 type: string
             required:
-            - diskRef
+            - id
             - noout
             - path
             - tags
@@ -191,11 +192,8 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              id:
-                format: int32
-                type: integer
-            required:
-            - id
+              state:
+                type: string
             type: object
         required:
         - spec

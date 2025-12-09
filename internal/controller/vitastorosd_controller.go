@@ -17,14 +17,16 @@ limitations under the License.
 package controller
 
 import (
+	"os/exec"
 	"context"
-	"os"
+	"encoding/json"
+	"encoding/hex"
+	"crypto/sha256"
 	"strconv"
+	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 // VitastorOSDReconciler reconciles a VitastorOSD object
@@ -42,119 +45,94 @@ type VitastorOSDReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-func (r *VitastorOSDReconciler) getConfiguration(osd *controlv1.VitastorOSD) (*appsv1.StatefulSet, error) {
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
-	}
-	imageName := osd.Spec.OSDImage
-	containerPortRaw, isEmpty := os.LookupEnv("CONTAINER_PORT")
-	if !isEmpty {
-		containerPortRaw = "5666"
-	}
-	cp, err := strconv.Atoi(containerPortRaw)
-	if err != nil {
-		return nil, err
-	}
-	containerPort := int32(cp)
+func (r *VitastorOSDReconciler) getConfiguration(osd *controlv2.VitastorOSD, cluster *controlv2.VitastorCluster) (*corev1.Pod, error) {
+	imageName := cluster.Spec.OSD.Image
+
+	containerPort := int32(5666) //container port, for now hardcoded
 	privilegedContainer := true
-	nodeName := osd.Spec.NodeName
-	osdPath := osd.Spec.OSDPath
-	replicas := int32(1)
 
-	labels := map[string]string{"osdName": osd.Name, "node": nodeName}
+	labels := map[string]string{
+		"control.vitastor.io/cluster": cluster.Name,
+		"control.vitastor.io/node":    osd.Labels["control.vitastor.io/node"],
+		"control.vitator.io/disk":     osd.Labels["control.vitastor.io/disk"],
+	}
 
-	depl := appsv1.StatefulSet{
-		ObjectMeta: ctrl.ObjectMeta{
-			Namespace: namespace,
-			Name:      osd.Name,
+	pod := corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Labels: labels,
+			Name:   "vitastor-osd-" + strconv.Itoa(int(osd.Spec.Id)),
 		},
-		Spec: appsv1.StatefulSetSpec{
-			Replicas: &replicas,
-			Selector: &v1.LabelSelector{
-				MatchLabels: labels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: v1.ObjectMeta{
-					Labels: labels,
-				},
-				Spec: corev1.PodSpec{
-					NodeName: nodeName,
-					Containers: []corev1.Container{
+		Spec: corev1.PodSpec{
+			NodeName: osd.Labels["control.vitastor.io/node"],
+			Containers: []corev1.Container{
+				{
+					Name:      "vitastor-osd",
+					Image:     imageName,
+					Command:   []string{"vitastor-disk"},
+					Args:      []string{"exec-osd", osd.Spec.Path},
+					Resources: cluster.Spec.OSD.Resources,
+					VolumeMounts: []corev1.VolumeMount{
 						{
-							Name:    "vitastor-osd",
-							Image:   imageName,
-							Command: []string{"vitastor-disk"},
-							Args:    []string{"exec-osd", osdPath},
-							Resources: corev1.ResourceRequirements{
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU: resource.MustParse("1000m"),
-								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "vitastor-config",
-									MountPath: "/etc/vitastor",
-								},
-								{
-									Name:      "host-dev",
-									MountPath: "/dev",
-								},
-								{
-									Name:      "host-sys",
-									MountPath: "/sys",
-								},
-								{
-									Name:      "host-lib-modules",
-									MountPath: "/lib/modules",
-								},
-							},
-							SecurityContext: &corev1.SecurityContext{
-								Privileged: &privilegedContainer,
-							},
-							Ports: []corev1.ContainerPort{{ContainerPort: containerPort}},
+							Name:      "vitastor-config",
+							MountPath: "/etc/vitastor",
+						},
+						{
+							Name:      "host-dev",
+							MountPath: "/dev",
+						},
+						{
+							Name:      "host-sys",
+							MountPath: "/sys",
+						},
+						{
+							Name:      "host-lib-modules",
+							MountPath: "/lib/modules",
 						},
 					},
-					PriorityClassName: "system-cluster-critical",
-					Volumes: []corev1.Volume{
-						{
-							Name: "host-dev",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/dev",
-								},
-							},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &privilegedContainer,
+					},
+					Ports: []corev1.ContainerPort{{ContainerPort: containerPort}},
+				},
+			},
+			PriorityClassName: "system-cluster-critical",
+			Volumes: []corev1.Volume{
+				{
+					Name: "host-dev",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/dev",
 						},
-						{
-							Name: "host-sys",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/sys",
-								},
-							},
+					},
+				},
+				{
+					Name: "host-sys",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/sys",
 						},
-						{
-							Name: "host-lib-modules",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/lib/modules",
-								},
-							},
+					},
+				},
+				{
+					Name: "host-lib-modules",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/lib/modules",
 						},
-						{
-							Name: "vitastor-config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "vitastor-config"},
-								},
-							},
+					},
+				},
+				{
+					Name: "vitastor-config",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "vitastor-config"},
 						},
 					},
 				},
 			},
 		},
 	}
-	return &depl, nil
+	return &pod, nil
 }
 
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds,verbs=get;list;watch;create;update;patch;delete
@@ -162,68 +140,113 @@ func (r *VitastorOSDReconciler) getConfiguration(osd *controlv1.VitastorOSD) (*a
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=statefulsets/status,verbs=get
+//+kubebuilder:rbac:groups=v1,rosources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=v1,resources=configmaps,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var log = log.FromContext(ctx)
-	namespace, isEmpty := os.LookupEnv("NAMESPACE")
-	if !isEmpty {
-		namespace = "vitastor-system"
-	}
-
-	var vitastorOSD controlv1.VitastorOSD
+	var vitastorOSD controlv2.VitastorOSD
 	err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorOSD)
 	if err != nil {
 		log.Error(err, "unable to fetch VitastorOSD, seems it's destroyed")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if deployment already exists, if not create a new deployment
-	foundSts := &appsv1.StatefulSet{}
-	err = r.Get(ctx, types.NamespacedName{Name: vitastorOSD.Name, Namespace: namespace}, foundSts)
+	var ownerCluster controlv2.VitastorCluster
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: vitastorOSD.Labels["control.vitastor.io/cluster"], Namespace: corev1.NamespaceAll}, &ownerCluster); err != nil {
+		log.Error(err, "unable to fetch owner VitastorCluster")
+		return ctrl.Result{}, err
+	}
+	if vitastorOSD.Status.State == "updateRequired" {
+		if ownerCluster.Status.ActiveOSD == vitastorOSD.Name {
+			vitastorOSD.Status.State = "updating"
+			if err := r.Update(ctx, &vitastorOSD); err != nil {
+				log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
+				return ctrl.Result{}, err
+			}
+		}
+	} 
+
+	// Check if Pod already exists, if not create a new one
+	foundOsdPod := &corev1.Pod{}
+	err = r.Get(ctx, types.NamespacedName{Name: vitastorOSD.Name, Namespace: ownerCluster.Spec.VitastorClusterNamespace}, foundOsdPod)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Deployment is not found - creating new one
-			log.Info("Deployment is not found, creating new one")
-			sts, err := r.getConfiguration(&vitastorOSD)
-			if err := controllerutil.SetControllerReference(&vitastorOSD, sts, r.Scheme); err != nil {
-				log.Error(err, "Failed to set owner for deployment")
+			// Pod is not found - creating new one
+			log.Info("Pod is not found, creating new one")
+			pod, err := r.getConfiguration(&vitastorOSD, &ownerCluster)
+			if err != nil {
+				log.Error(err, "Failed to create new Pod object", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 				return ctrl.Result{}, err
 			}
-			if err != nil {
-				log.Error(err, "Failed to create new Deployment", "Deployment.Namespace", sts.Namespace, "Deployment.Name", sts.Name)
+			hex, err := contentHash(pod)
+			if err != nil{
+				log.Error(err, "Failed to compute Pod content hash", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 				return ctrl.Result{}, err
 			}
-			err = r.Create(ctx, sts)
+			pod.Annotations["control.vitastor.io/content-hash"] = hex
+			if err := controllerutil.SetControllerReference(&vitastorOSD, pod, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner for OSD pod")
+				return ctrl.Result{}, err
+			}
+			err = r.Create(ctx, pod)
 			if err != nil {
-				log.Error(err, "Failed to create new Deployment", "Deployment.Namespace", sts.Namespace, "Deployment.Name", sts.Name)
+				log.Error(err, "Failed to create new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{Requeue: true}, nil
 		}
-		log.Error(err, "Failed to fetch osd deployment")
+		log.Error(err, "Failed to fetch OSD pod")
 		return ctrl.Result{}, err
 	}
 
-	//Check OSD image
-	if foundSts.Spec.Template.Spec.Containers[0].Image != vitastorOSD.Spec.OSDImage {
-		log.Info("OSD image mismatch")
-		foundSts.Spec.Template.Spec.Containers[0].Image = vitastorOSD.Spec.OSDImage
-		if err := r.Update(ctx, foundSts); err != nil {
-			log.Error(err, "Failed to update OSD statefulset")
+
+
+	//Check OSD content hash
+	pod, err := r.getConfiguration(&vitastorOSD, &ownerCluster)
+	if err != nil {
+		log.Error(err, "Failed to create new Pod object", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
+		return ctrl.Result{}, err
+	}
+	contentHash, err := contentHash(pod)
+	if err != nil{
+		log.Error(err, "Failed to compute Pod content hash", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
+		return ctrl.Result{}, err
+	}
+	if foundOsdPod.Annotations["control.vitastor.io/content-hash"] != contentHash {
+		log.Info("OSD image mismatch, updating state", "osd", vitastorOSD.Spec.Id)
+		vitastorOSD.Status.State = "updateRequired"
+		if err := r.Update(ctx, &vitastorOSD); err != nil {
+			log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func contentHash(pod *corev1.Pod) (string, error) {
+	podSpecJsonBytes, err := json.Marshal(&pod)
+	if err != nil {
+		return "", err
+	}
+	podSpecHash := sha256.Sum256(podSpecJsonBytes)
+	hex := hex.EncodeToString(podSpecHash[:])
+	return hex, nil
+}
+
+func setNoout(osd *controlv2.VitastorOSD, value bool) error {
+	osdId := strconv.Itoa(int(osd.Spec.Id))
+	return exec.Command("vitastor-cli", "modify-osd", "--noout", strconv.FormatBool(value), osdId).Run()
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *VitastorOSDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&controlv1.VitastorOSD{}).
-		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.Pod{}).
 		Complete(r)
 }

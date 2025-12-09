@@ -43,6 +43,11 @@ spec:
                 format: int32
                 type: integer
               desiredState:
+                enum:
+                - Discovered
+                - Prepared
+                - Dicommissioned
+                - Unknown
                 type: string
               devicePath:
                 type: string

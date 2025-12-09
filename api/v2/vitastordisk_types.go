@@ -30,11 +30,14 @@ type VitastorDiskSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	DevicePath      string `json:"devicePath"`
-	DesiredOSDCount int32  `json:"desiredOSDCount,omitempty"`
-	DesiredState    string `json:"desiredState,omitempty"`
-	NodeRef         string `json:"nodeRef"`
+	DevicePath      string       `json:"devicePath"`
+	DesiredOSDCount int32        `json:"desiredOSDCount,omitempty"`
+	DesiredState    DesiredState `json:"desiredState,omitempty"`
+	NodeRef         string       `json:"nodeRef"`
 }
+
+// +kubebuilder:validation:Enum=Discovered;Prepared;Dicommissioned;Unknown
+type DesiredState string
 
 // VitastorDiskStatus defines the observed state of VitastorDisk.
 type VitastorDiskStatus struct {

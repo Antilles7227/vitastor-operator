@@ -158,6 +158,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host"}
 	// Check if node has fd.vitastor.io labels
+	// TODO: If there are more than 1 FD label that code will fail, need to refactor it to proper FD chaining
 	for label, value := range k8sNode.Labels {
 		if strings.Contains(label, "fd.vitastor.io") {
 			splittedLabel := strings.Split(label, "/")
@@ -381,6 +382,10 @@ func (r *VitastorNodeReconciler) getDiskConfiguration(diskPath string, node *con
 	disk := &controlv2.VitastorDisk{
 		ObjectMeta: ctrl.ObjectMeta{
 			Name: node.Name + "_" + strings.Trim("/dev/", diskPath),
+			Labels: map[string]string{
+				"control.vitastor.io/cluster": node.Labels["control.vitastor.io/cluster"],
+				"control.vitastor.io/node":    node.Name,
+			},
 		},
 		Spec: controlv2.VitastorDiskSpec{
 			NodeRef:    node.Name,
@@ -436,7 +441,7 @@ func (r *VitastorNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&controlv1.VitastorNode{}).
-		Owns(&controlv1.VitastorOSD{}).
+		For(&controlv2.VitastorNode{}).
+		Owns(&controlv2.VitastorDisk{}).
 		Complete(r)
 }
