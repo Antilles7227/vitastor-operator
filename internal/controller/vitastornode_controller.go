@@ -22,12 +22,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,14 +34,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 // VitastorNodeReconciler reconciles a VitastorNode object
 type VitastorNodeReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme     *runtime.Scheme
+	HttpClient *http.Client
 }
 
 type SystemPartition struct {
@@ -79,6 +76,7 @@ type VitastorNodePlacement struct {
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastornodes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastornodes/finalizers,verbs=update
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 //+kubebuilder:rbac:groups=v1,resources=pods,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -192,7 +190,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	agentList := &corev1.PodList{}
 	getOpts := []client.ListOption{
 		client.InNamespace(ownerCluster.Spec.VitastorClusterNamespace),
-		client.MatchingLabels{"app": "vitastor-agent"},
+		client.MatchingLabels{"control.vitastor.io/app": "vitastor-agent"},
 		client.MatchingFields{".spec.node": vitastorNode.Name},
 	}
 	log.Info("Fetching agent for that VitastorNode...")
@@ -200,9 +198,9 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		log.Error(err, "unable to fetch agent for that VitastorNode CRD")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if len(agentList.Items) == 0 {
+	if len(agentList.Items) == 0 || agentList.Items[0].Status.PodIP == "" {
 		log.Info("Seems like that agent Pod is not running, reschedule reconciling...")
-		return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, nil
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	agentIP := agentList.Items[0].Status.PodIP
 	systemDisksURL := "http://" + agentIP + ":8000/disk"
@@ -253,7 +251,7 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				log.Error(err, "Unable to parse placement level block")
 				return ctrl.Result{}, err
 			}
-			placementLevel[vitastorNode.Name+"_"+strings.Trim("/dev/", disk.Name)] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
+			placementLevel[vitastorNode.Name+"_"+strings.TrimPrefix(disk.Name, "/dev/")] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
 			var placementLevelBytes []byte
 			placementLevelBytes, err = json.Marshal(placementLevel)
 			if err != nil {
@@ -355,11 +353,6 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, nil
 }
 
-func compareArrays(x, y []string) bool {
-	less := func(a, b string) bool { return a < b }
-	return cmp.Equal(x, y, cmpopts.SortSlices(less))
-}
-
 func contains(diskList []controlv2.VitastorDisk, diskName string) bool {
 	for _, v := range diskList {
 		if v.Spec.DevicePath == diskName {
@@ -381,7 +374,7 @@ func contains_str_list(s []string, str string) bool {
 func (r *VitastorNodeReconciler) getDiskConfiguration(diskPath string, node *controlv2.VitastorNode) *controlv2.VitastorDisk {
 	disk := &controlv2.VitastorDisk{
 		ObjectMeta: ctrl.ObjectMeta{
-			Name: node.Name + "_" + strings.Trim("/dev/", diskPath),
+			Name: node.Name + "_" + strings.TrimPrefix(diskPath, "/dev/"),
 			Labels: map[string]string{
 				"control.vitastor.io/cluster": node.Labels["control.vitastor.io/cluster"],
 				"control.vitastor.io/node":    node.Name,
@@ -393,21 +386,6 @@ func (r *VitastorNodeReconciler) getDiskConfiguration(diskPath string, node *con
 		},
 	}
 	return disk
-}
-
-func (r *VitastorNodeReconciler) getConfiguration(osdPath string, osdNumber int, node *controlv1.VitastorNode) *controlv1.VitastorOSD {
-	osd := &controlv1.VitastorOSD{
-		ObjectMeta: ctrl.ObjectMeta{
-			Name: "vitastor-osd-" + strconv.Itoa(osdNumber),
-		},
-		Spec: controlv1.VitastorOSDSpec{
-			NodeName:  node.Spec.NodeName,
-			OSDPath:   osdPath,
-			OSDNumber: osdNumber,
-			OSDImage:  node.Spec.OSDImage,
-		},
-	}
-	return osd
 }
 
 func loadConfiguration(ctx context.Context, file string) (VitastorConfig, error) {
@@ -426,9 +404,9 @@ func loadConfiguration(ctx context.Context, file string) (VitastorConfig, error)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *VitastorNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &controlv1.VitastorOSD{}, ".spec.nodeName", func(rawObj client.Object) []string {
-		osd := rawObj.(*controlv1.VitastorOSD)
-		return []string{osd.Spec.NodeName}
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &controlv2.VitastorDisk{}, ".spec.nodeRef", func(rawObj client.Object) []string {
+		osd := rawObj.(*controlv2.VitastorDisk)
+		return []string{osd.Spec.NodeRef}
 	}); err != nil {
 		return err
 	}

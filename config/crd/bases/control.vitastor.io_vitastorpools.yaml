@@ -133,12 +133,14 @@ spec:
                 type: string
               parityChunks:
                 format: int32
+                minimum: 1
                 type: integer
               pgCount:
                 format: int32
                 type: integer
               pgMinSize:
                 format: int32
+                minimum: 1
                 type: integer
               pgSize:
                 format: int32
@@ -146,23 +148,31 @@ spec:
               rawPlacement:
                 type: string
               scheme:
+                enum:
+                - replicated
+                - xor
+                - ec
+                - jerasure
                 type: string
+                x-kubernetes-validations:
+                - message: Scheme is immutable
+                  rule: self == oldSelf
               scrubInterval:
                 type: string
               vitastorFS:
                 type: boolean
             required:
-            - failureDomain
-            - levelPlacement
-            - localReads
             - name
             - pgCount
             - pgMinSize
             - pgSize
-            - rawPlacement
             - scheme
             - vitastorFS
             type: object
+            x-kubernetes-validations:
+            - message: ParityChunks is required when scheme is xor, ec, or jerasure
+              rule: 'self.scheme in [''xor'', ''ec'', ''jerasure''] ? has(self.parityChunks)
+                : true'
           status:
             description: status defines the observed state of VitastorPool
             properties:
@@ -240,6 +250,9 @@ spec:
                 x-kubernetes-list-type: map
               efficiency:
                 type: string
+              id:
+                format: int32
+                type: integer
               totalBytes:
                 format: int64
                 type: integer
@@ -251,6 +264,7 @@ spec:
             required:
             - availableBytes
             - efficiency
+            - id
             - totalBytes
             - usedBytes
             - usedPercent

@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
@@ -99,35 +98,31 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Cluster-wide settings
 	// ===
 
-	// TODO: Compare existing node_placement tree with provided in CR to remove unnesessary Put
-	// TODO: Implement defaulter webhook to remove hardcoded placement level from reconciler loop
-	if len(vitastorCluster.Spec.ClusterParameters.PlacementLevels) == 0 {
-		log.Info("placement level not set for cluster, using default one")
-		placementLevelBytes, err := json.Marshal(defaultPlacementLevels)
-		if err != nil {
-			log.Error(err, "unable to marshal default placement level block")
-			return ctrl.Result{}, err
+	targetLevels := vitastorCluster.Spec.ClusterParameters.PlacementLevels
+	if len(targetLevels) == 0 {
+		targetLevels = defaultPlacementLevels
+	}
+
+	placementLevelBytes, _ := json.Marshal(targetLevels)
+	nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
+
+	// Idempotency check: Get before Put
+	resp, err := cli.Get(ctx, nodePlacementPath)
+	if err == nil {
+		shouldUpdate := false
+		if len(resp.Kvs) == 0 {
+			shouldUpdate = true
+		} else if string(resp.Kvs[0].Value) != string(placementLevelBytes) {
+			shouldUpdate = true
 		}
-		nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
-		placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-		if err != nil {
-			log.Error(err, "unable to update placement level list with default levels")
-			return ctrl.Result{}, err
+
+		if shouldUpdate {
+			log.Info("Updating placement levels in Etcd")
+			_, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
+			if err != nil {
+				log.Error(err, "Failed to update placement levels")
+			}
 		}
-		log.Info(placementLevelResp.Header.String())
-	} else {
-		placementLevelBytes, err := json.Marshal(vitastorCluster.Spec.ClusterParameters.PlacementLevels)
-		if err != nil {
-			log.Error(err, "unable to marshal placement level block")
-			return ctrl.Result{}, err
-		}
-		nodePlacementPath := config.VitastorPrefix + "/config/placement_levels"
-		placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-		if err != nil {
-			log.Error(err, "unable to update placement level list")
-			return ctrl.Result{}, err
-		}
-		log.Info(placementLevelResp.Header.String())
 	}
 
 	// ===
@@ -275,7 +270,59 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	if err := r.reconcileRollingUpdates(ctx, &vitastorCluster); err != nil {
+		log.Error(err, "Failed to coordinate rolling updates")
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *VitastorClusterReconciler) reconcileRollingUpdates(ctx context.Context, cluster *controlv2.VitastorCluster) error {
+	// 1. Получаем список всех OSD этого кластера
+	osdList := &controlv2.VitastorOSDList{}
+	if err := r.List(ctx, osdList, client.MatchingLabels{"vitastor.io/cluster": cluster.Name}); err != nil {
+		return err
+	}
+
+	// 2. Проверяем текущего активного кандидата
+	activeOSDName := cluster.Status.ActiveOSD
+	if activeOSDName != "" {
+		// Проверяем статус этого OSD
+		var activeOSD controlv2.VitastorOSD
+		found := false
+		for _, o := range osdList.Items {
+			if o.Name == activeOSDName {
+				activeOSD = o
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// OSD удален? Сбрасываем лок
+			cluster.Status.ActiveOSD = ""
+			return r.Status().Update(ctx, cluster)
+		}
+
+		if activeOSD.Status.State == "Running" {
+			// TODO: Check rebalance status with cli
+			log.FromContext(ctx).Info("OSD updated successfully, releasing lock", "osd", activeOSDName)
+			cluster.Status.ActiveOSD = ""
+			return r.Status().Update(ctx, cluster)
+		}
+
+		return nil
+	}
+
+	for _, osd := range osdList.Items {
+		if osd.Status.State == "updateRequired" {
+			log.FromContext(ctx).Info("Locking cluster for OSD update", "osd", osd.Name)
+			cluster.Status.ActiveOSD = osd.Name
+			return r.Status().Update(ctx, cluster)
+		}
+	}
+
+	return nil
 }
 
 func (r *VitastorClusterReconciler) getVitastorNodeConfiguration(nodeName string, clusterName string) (*controlv2.VitastorNode, error) {
@@ -376,6 +423,7 @@ func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv2.Vit
 				},
 				Spec: corev1.PodSpec{
 					NodeSelector: nodeLabels,
+					HostNetwork:  true,
 					Containers: []corev1.Container{
 						{
 							Name:  "vitastor-agent",
@@ -450,8 +498,8 @@ func (r *VitastorClusterReconciler) getAgentConfiguration(cluster *controlv2.Vit
 func (r *VitastorClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&controlv1.VitastorCluster{}).
-		Owns(&controlv1.VitastorNode{}).
+		For(&controlv2.VitastorCluster{}).
+		Owns(&controlv2.VitastorNode{}).
 		Owns(&appsv1.DaemonSet{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)

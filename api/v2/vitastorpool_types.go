@@ -24,29 +24,35 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // VitastorPoolSpec defines the desired state of VitastorPool
+// +kubebuilder:validation:XValidation:rule="self.scheme in ['xor', 'ec', 'jerasure'] ? has(self.parityChunks) : true",message="ParityChunks is required when scheme is xor, ec, or jerasure"
 type VitastorPoolSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	Name               string `json:"name"`
-	VitastorFS         bool   `json:"vitastorFS"`
-	Scheme             string `json:"scheme"`
-	PGSize             int32  `json:"pgSize"`
-	ParityChunks       int32  `json:"parityChunks,omitempty"`
-	PGMinSize          int32  `json:"pgMinSize"`
-	PGCount            int32  `json:"pgCount"`
-	FailureDomain      string `json:"failureDomain"`
-	LevelPlacement     string `json:"levelPlacement"`
-	RawPlacement       string `json:"rawPlacement"`
-	LocalReads         string `json:"localReads"`
-	MaxOSDCombinations int32  `json:"maxOSDCombinations,omitempty"`
-	BlockSize          int32  `json:"blockSize,omitempty"`
-	BitmapGranularity  int32  `json:"bitmapGranularity,omitempty"`
-	ImmediateCommit    string `json:"immediateCommit,omitempty"`
-	OSDTags            string `json:"osdTags,omitempty"`
-	ScrubInterval      string `json:"scrubInterval,omitempty"`
+	Name       string `json:"name"`
+	VitastorFS bool   `json:"vitastorFS"`
+	// +kubebuilder:validation:Enum=replicated;xor;ec;jerasure
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Scheme is immutable"
+	Scheme string `json:"scheme"`
+	PGSize int32  `json:"pgSize"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ParityChunks *int32 `json:"parityChunks,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	PGMinSize          int32   `json:"pgMinSize"`
+	PGCount            int32   `json:"pgCount"`
+	FailureDomain      *string `json:"failureDomain,omitempty"`
+	LevelPlacement     *string `json:"levelPlacement,omitempty"`
+	RawPlacement       *string `json:"rawPlacement,omitempty"`
+	LocalReads         *string `json:"localReads,omitempty"`
+	MaxOSDCombinations *int32  `json:"maxOSDCombinations,omitempty"`
+	BlockSize          *int32  `json:"blockSize,omitempty"`
+	BitmapGranularity  *int32  `json:"bitmapGranularity,omitempty"`
+	ImmediateCommit    *string `json:"immediateCommit,omitempty"`
+	OSDTags            *string `json:"osdTags,omitempty"`
+	ScrubInterval      *string `json:"scrubInterval,omitempty"`
 }
 
 // VitastorPoolStatus defines the observed state of VitastorPool.
@@ -70,6 +76,7 @@ type VitastorPoolStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions  []metav1.Condition `json:"conditions,omitempty"`
+	ID          int32              `json:"id"`
 	Total       int64              `json:"totalBytes"`
 	Used        int64              `json:"usedBytes"`
 	Available   int64              `json:"availableBytes"`

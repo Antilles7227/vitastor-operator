@@ -34,6 +34,9 @@ type MonitorSpec struct {
 	MonChangeTimeoutMsecs int32                       `json:"monChangeTimeoutMsecs,omitempty"`
 	MonStatsTimeoutMsecs  int32                       `json:"monStatsTimeoutMsecs,omitempty"`
 	OsdOutTimeSecs        int32                       `json:"osdOutTimeSecs,omitempty"`
+	UseAntietcd           bool                        `json:"useAntietcd,omitempty"`
+	AntietcdDataFile      string                      `json:"antietcdDataFile,omitempty"`
+	AntietcdPort          int32                       `json:"antietcdPort,omitempty"`
 }
 
 type AgentSpec struct {
@@ -122,7 +125,7 @@ type VitastorClusterStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Represents OSD that now is allowed to update
-	ActiveOSD  string             `json:"activeRollingOSD,omitempty"`
+	ActiveOSD string `json:"activeRollingOSD,omitempty"`
 }
 
 // +kubebuilder:object:root=true

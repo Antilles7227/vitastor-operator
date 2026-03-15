@@ -17,11 +17,11 @@ limitations under the License.
 package controller
 
 import (
-	"os/exec"
 	"context"
-	"encoding/json"
-	"encoding/hex"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
@@ -140,13 +139,14 @@ func (r *VitastorOSDReconciler) getConfiguration(osd *controlv2.VitastorOSD, clu
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=statefulsets/status,verbs=get
-//+kubebuilder:rbac:groups=v1,rosources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=v1,resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=v1,resources=configmaps,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var log = log.FromContext(ctx)
+
 	var vitastorOSD controlv2.VitastorOSD
 	err := r.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceAll, Name: req.Name}, &vitastorOSD)
 	if err != nil {
@@ -159,15 +159,17 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Error(err, "unable to fetch owner VitastorCluster")
 		return ctrl.Result{}, err
 	}
+
 	if vitastorOSD.Status.State == "updateRequired" {
 		if ownerCluster.Status.ActiveOSD == vitastorOSD.Name {
 			vitastorOSD.Status.State = "updating"
-			if err := r.Update(ctx, &vitastorOSD); err != nil {
+			if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
 				log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
 				return ctrl.Result{}, err
 			}
+			setNoout(&vitastorOSD, true)
 		}
-	} 
+	}
 
 	// Check if Pod already exists, if not create a new one
 	foundOsdPod := &corev1.Pod{}
@@ -182,7 +184,7 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			hex, err := contentHash(pod)
-			if err != nil{
+			if err != nil {
 				log.Error(err, "Failed to compute Pod content hash", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 				return ctrl.Result{}, err
 			}
@@ -202,8 +204,6 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-
-
 	//Check OSD content hash
 	pod, err := r.getConfiguration(&vitastorOSD, &ownerCluster)
 	if err != nil {
@@ -211,31 +211,54 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 	contentHash, err := contentHash(pod)
-	if err != nil{
+	if err != nil {
 		log.Error(err, "Failed to compute Pod content hash", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 		return ctrl.Result{}, err
 	}
 	if foundOsdPod.Annotations["control.vitastor.io/content-hash"] != contentHash {
 		log.Info("OSD image mismatch, updating state", "osd", vitastorOSD.Spec.Id)
 		vitastorOSD.Status.State = "updateRequired"
-		if err := r.Update(ctx, &vitastorOSD); err != nil {
+		if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
 			log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
+	} else {
+		log.Info("OSD started", "osd", vitastorOSD.Spec.Id)
+		vitastorOSD.Status.State = "running"
+		setNoout(&vitastorOSD, false)
+		if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
 func contentHash(pod *corev1.Pod) (string, error) {
-	podSpecJsonBytes, err := json.Marshal(&pod)
+	type HashableSpec struct {
+		Image     string
+		Resources corev1.ResourceRequirements
+		Command   []string
+		Args      []string
+		Env       []corev1.EnvVar
+	}
+	c := pod.Spec.Containers[0]
+
+	hSpec := HashableSpec{
+		Image:     c.Image,
+		Resources: c.Resources,
+		Command:   c.Command,
+		Args:      c.Args,
+		Env:       c.Env,
+	}
+
+	data, err := json.Marshal(hSpec)
 	if err != nil {
 		return "", err
 	}
-	podSpecHash := sha256.Sum256(podSpecJsonBytes)
-	hex := hex.EncodeToString(podSpecHash[:])
-	return hex, nil
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 func setNoout(osd *controlv2.VitastorOSD, value bool) error {
@@ -246,7 +269,7 @@ func setNoout(osd *controlv2.VitastorOSD, value bool) error {
 // SetupWithManager sets up the controller with the Manager.
 func (r *VitastorOSDReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&controlv1.VitastorOSD{}).
+		For(&controlv2.VitastorOSD{}).
 		Owns(&corev1.Pod{}).
 		Complete(r)
 }

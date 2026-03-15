@@ -187,6 +187,11 @@ spec:
                 type: object
               monitor:
                 properties:
+                  antietcdDataFile:
+                    type: string
+                  antietcdPort:
+                    format: int32
+                    type: integer
                   etcdMonRetries:
                     format: int32
                     type: integer
@@ -270,6 +275,8 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  useAntietcd:
+                    type: boolean
                 required:
                 - image
                 - replicas
@@ -428,6 +435,7 @@ spec:
             description: status defines the observed state of VitastorCluster
             properties:
               activeRollingOSD:
+                description: Represents OSD that now is allowed to update
                 type: string
               conditions:
                 description: |-

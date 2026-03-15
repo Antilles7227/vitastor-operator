@@ -5,6 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - apps
   resources:
   - daemonsets
@@ -88,6 +97,22 @@ rules:
   resources:
   - pods
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vitastor.io
+  resources:
+  - vitastorosds
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
