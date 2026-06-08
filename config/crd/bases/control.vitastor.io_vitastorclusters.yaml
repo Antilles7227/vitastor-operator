@@ -75,7 +75,20 @@ spec:
     storage: false
     subresources:
       status: {}
-  - name: v2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.vitastorNodeLabel
+      name: Node Label
+      type: string
+    - jsonPath: .spec.monitor.replicas
+      name: Monitors
+      type: integer
+    - jsonPath: .spec.vitastorClusterNamespace
+      name: Namespace
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: VitastorCluster is the Schema for the vitastorclusters API

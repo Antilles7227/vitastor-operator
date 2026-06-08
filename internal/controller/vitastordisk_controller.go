@@ -38,6 +38,14 @@ import (
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
+// DiskStatus* constants reflect the controller-internal observed state of a VitastorDisk.
+const (
+	DiskStatusEmpty          = "Empty"
+	DiskStatusOSD            = "OSD"
+	DiskStatusDraining       = "Draining"
+	DiskStatusDecommissioned = "Decommissioned"
+)
+
 // VitastorDiskReconciler reconciles a VitastorDisk object
 type VitastorDiskReconciler struct {
 	client.Client
@@ -59,15 +67,11 @@ type VitastorParameters struct {
 // +kubebuilder:rbac:groups=control.vitastor.io,resources=vitastordisks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=control.vitastor.io,resources=vitastordisks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=control.vitastor.io,resources=vitastordisks/finalizers,verbs=update
-// +kubebuilder:rbac:groups=vitastor.io,resources=vitastorosds,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorosds,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the VitastorDisk object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.1/pkg/reconcile
@@ -79,7 +83,13 @@ func (r *VitastorDiskReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	agentPod, err := r.findAgentPod(ctx, disk.Spec.NodeRef, disk.Namespace)
+	namespace, err := r.getClusterNamespace(ctx, &disk)
+	if err != nil {
+		log.Error(err, "Failed to determine cluster namespace")
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+	}
+
+	agentPod, err := r.findAgentPod(ctx, disk.Spec.NodeRef, namespace)
 	if err != nil {
 		log.Error(err, "Failed to find agent pod for node", "node", disk.Spec.NodeRef)
 		// Retry slower, maybe node is down or agent restarting
@@ -94,19 +104,23 @@ func (r *VitastorDiskReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	isOSD := len(foundOSDs) > 0
 
-	currentStatusType := controlv2.DiskType("Empty")
-	currentStatusState := "Empty"
+	currentStatusType := controlv2.DiskType(DiskStatusEmpty)
+	currentStatusState := DiskStatusEmpty
 
 	if isOSD {
-		currentStatusType = controlv2.DiskType("OSD")
-		currentStatusState = "OSD"
+		currentStatusType = controlv2.DiskType(DiskStatusOSD)
+		currentStatusState = DiskStatusOSD
 	}
 
+	// Only update the observed status when we are not in a terminal drain/decommission
+	// state — otherwise we would overwrite "Draining" back to "OSD".
 	statusChanged := false
-	if disk.Status.Type != currentStatusType || disk.Status.State != currentStatusState {
-		disk.Status.Type = currentStatusType
-		disk.Status.State = currentStatusState
-		statusChanged = true
+	if disk.Status.State != DiskStatusDraining && disk.Status.State != DiskStatusDecommissioned {
+		if disk.Status.Type != currentStatusType || disk.Status.State != currentStatusState {
+			disk.Status.Type = currentStatusType
+			disk.Status.State = currentStatusState
+			statusChanged = true
+		}
 	}
 
 	if statusChanged {
@@ -118,10 +132,10 @@ func (r *VitastorDiskReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	switch disk.Spec.DesiredState {
-	case "Prepared":
+	case controlv2.DiskStatePrepared:
 		if isOSD {
 			for _, param := range foundOSDs {
-				if err := r.ensureOSDCR(ctx, &disk, &param); err != nil {
+				if err := r.ensureOSDCR(ctx, &disk, &param, namespace); err != nil {
 					log.Error(err, "Failed to ensure VitastorOSD CR exists", "id", param.OSDNum)
 					return ctrl.Result{}, err
 				}
@@ -138,25 +152,55 @@ func (r *VitastorDiskReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 			}
 			for _, param := range newParams {
-				if err := r.ensureOSDCR(ctx, &disk, &param); err != nil {
+				if err := r.ensureOSDCR(ctx, &disk, &param, namespace); err != nil {
 					log.Error(err, "Failed to ensure OSD CR", "osd_id", param.OSDNum)
 					return ctrl.Result{}, err
 				}
 			}
-			disk.Status.State = "OSD"
-			disk.Status.Type = "OSD"
+			disk.Status.State = DiskStatusOSD
+			disk.Status.Type = controlv2.DiskType(DiskStatusOSD)
 			r.Status().Update(ctx, &disk)
 		}
 
-	case "Decommissioned":
-		if isOSD {
-			log.Info("Decommissioning OSD: deleting CR", "disk", disk.Name)
-			if err := r.deleteOSDCR(ctx, &disk); err != nil {
+	case controlv2.DiskStateDecommissioned:
+		// Phase B: if we are already draining, check whether drain is complete.
+		if disk.Status.State == DiskStatusDraining {
+			log.Info("Checking OSD drain status", "disk", disk.Name)
+			drained, err := r.areOSDsDrained(ctx, &disk, namespace)
+			if err != nil {
+				log.Error(err, "Failed to check OSD drain status")
+				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+			}
+			if !drained {
+				log.Info("OSDs not yet drained, requeuing", "disk", disk.Name)
+				return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+			}
+			log.Info("OSDs drained, removing OSD CRs", "disk", disk.Name)
+			if err := r.deleteOSDCR(ctx, &disk, namespace); err != nil {
 				return ctrl.Result{}, err
 			}
+			disk.Status.State = DiskStatusDecommissioned
+			if err := r.Status().Update(ctx, &disk); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
 		}
 
-	case "Discovered":
+		// Phase A: initiate drain — set all owned OSD weights to 0.
+		if isOSD && disk.Status.State != DiskStatusDecommissioned {
+			log.Info("Initiating disk decommission: setting OSD weights to 0", "disk", disk.Name)
+			if err := r.initiateOSDDrain(ctx, &disk, namespace); err != nil {
+				log.Error(err, "Failed to initiate OSD drain")
+				return ctrl.Result{}, err
+			}
+			disk.Status.State = DiskStatusDraining
+			if err := r.Status().Update(ctx, &disk); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+		}
+
+	case controlv2.DiskStateDiscovered:
 		// Do nothing, just observation
 	}
 
@@ -167,7 +211,7 @@ func (r *VitastorDiskReconciler) findAgentPod(ctx context.Context, nodeName, nam
 	podList := &corev1.PodList{}
 	opts := []client.ListOption{
 		client.InNamespace(namespace),
-		client.MatchingLabels{"app": "vitastor-agent"},
+		client.MatchingLabels{"control.vitastor.io/app": "vitastor-agent"},
 		client.MatchingFields{".spec.nodeName": nodeName},
 	}
 	if err := r.List(ctx, podList, opts...); err != nil {
@@ -248,17 +292,17 @@ func (r *VitastorDiskReconciler) provisionOSD(agentIP, devicePath string, osdNum
 }
 
 // ensureOSDCR creates VitastorOSD CR if missing
-func (r *VitastorDiskReconciler) ensureOSDCR(ctx context.Context, disk *controlv2.VitastorDisk, params *VitastorParameters) error {
+func (r *VitastorDiskReconciler) ensureOSDCR(ctx context.Context, disk *controlv2.VitastorDisk, params *VitastorParameters, namespace string) error {
 	osdName := fmt.Sprintf("vitastor-osd-%d", params.OSDNum)
 
 	osd := &controlv2.VitastorOSD{}
-	err := r.Get(ctx, types.NamespacedName{Name: osdName, Namespace: disk.Namespace}, osd)
+	err := r.Get(ctx, types.NamespacedName{Name: osdName, Namespace: namespace}, osd)
 	if err != nil && errors.IsNotFound(err) {
 		// Create
 		newOSD := &controlv2.VitastorOSD{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      osdName,
-				Namespace: disk.Namespace,
+				Namespace: namespace,
 				Labels: map[string]string{
 					"vitastor.io/cluster": disk.Labels["vitastor.io/cluster"],
 					"vitastor.io/disk":    disk.Name,
@@ -281,10 +325,10 @@ func (r *VitastorDiskReconciler) ensureOSDCR(ctx context.Context, disk *controlv
 	return err
 }
 
-func (r *VitastorDiskReconciler) deleteOSDCR(ctx context.Context, disk *controlv2.VitastorDisk) error {
+func (r *VitastorDiskReconciler) deleteOSDCR(ctx context.Context, disk *controlv2.VitastorDisk, namespace string) error {
 	// Ищем OSD, принадлежащие этому диску
 	osdList := &controlv2.VitastorOSDList{}
-	if err := r.List(ctx, osdList, client.InNamespace(disk.Namespace), client.MatchingLabels{"vitastor.io/disk": disk.Name}); err != nil {
+	if err := r.List(ctx, osdList, client.InNamespace(namespace), client.MatchingLabels{"vitastor.io/disk": disk.Name}); err != nil {
 		return err
 	}
 
@@ -295,6 +339,76 @@ func (r *VitastorDiskReconciler) deleteOSDCR(ctx context.Context, disk *controlv
 		}
 	}
 	return nil
+}
+
+// initiateOSDDrain sets the weight of all OSDs belonging to this disk to "0",
+// which signals the Vitastor monitor to migrate data away from them.
+func (r *VitastorDiskReconciler) initiateOSDDrain(ctx context.Context, disk *controlv2.VitastorDisk, namespace string) error {
+	log := logf.FromContext(ctx)
+
+	osdList := &controlv2.VitastorOSDList{}
+	if err := r.List(ctx, osdList, client.InNamespace(namespace), client.MatchingLabels{
+		"vitastor.io/disk": disk.Name,
+	}); err != nil {
+		return fmt.Errorf("listing OSDs for disk %s: %w", disk.Name, err)
+	}
+
+	for i := range osdList.Items {
+		osd := &osdList.Items[i]
+		if osd.Spec.Weight != "0" {
+			osd.Spec.Weight = "0"
+			if err := r.Update(ctx, osd); err != nil {
+				log.Error(err, "Failed to set OSD weight to 0", "osd", osd.Name)
+				return err
+			}
+			log.Info("Set OSD weight to 0 for drain", "osd", osd.Name)
+		}
+	}
+	return nil
+}
+
+// areOSDsDrained returns true when all OSDs belonging to the disk have weight "0"
+// and are no longer in the Running state (i.e., data migration is complete).
+func (r *VitastorDiskReconciler) areOSDsDrained(ctx context.Context, disk *controlv2.VitastorDisk, namespace string) (bool, error) {
+	osdList := &controlv2.VitastorOSDList{}
+	if err := r.List(ctx, osdList, client.InNamespace(namespace), client.MatchingLabels{
+		"vitastor.io/disk": disk.Name,
+	}); err != nil {
+		return false, fmt.Errorf("listing OSDs for disk %s: %w", disk.Name, err)
+	}
+
+	// If no OSD CRs exist, drain is complete
+	if len(osdList.Items) == 0 {
+		return true, nil
+	}
+
+	// Check that all OSDs have weight=0 and are not in Running state
+	for _, osd := range osdList.Items {
+		if osd.Spec.Weight != "0" {
+			return false, nil // weight not yet set to 0
+		}
+		if osd.Status.State == OSDStateRunning {
+			return false, nil // still running
+		}
+	}
+
+	// All OSDs have weight=0 and are not running — consider drained
+	return true, nil
+}
+
+func (r *VitastorDiskReconciler) getClusterNamespace(ctx context.Context, disk *controlv2.VitastorDisk) (string, error) {
+	clusterName, ok := disk.Labels["control.vitastor.io/cluster"]
+	if !ok || clusterName == "" {
+		return "vitastor-system", nil // fallback default
+	}
+	var cluster controlv2.VitastorCluster
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterName}, &cluster); err != nil {
+		return "vitastor-system", nil // fallback
+	}
+	if cluster.Spec.VitastorClusterNamespace != "" {
+		return cluster.Spec.VitastorClusterNamespace, nil
+	}
+	return "vitastor-system", nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go.etcd.io/etcd/client/v3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,18 +45,37 @@ type VitastorPoolReconciler struct {
 }
 
 type VitastorPoolConfig struct {
-	Name               string  `json:"name"`
-	Scheme             string  `json:"scheme"`
-	PGSize             int32   `json:"pg_size"`
-	ParityChunks       *int32  `json:"parity_chunks,omitempty"`
-	PGMinSize          int32   `json:"pg_minsize"`
-	PGCount            int32   `json:"pg_count"`
-	FailureDomain      *string `json:"failure_domain,omitempty"`
-	MaxOSDCombinations *int32  `json:"max_osd_combinations,omitempty"`
-	BlockSize          *int32  `json:"block_size,omitempty"`
-	ImmediateCommit    *string `json:"immediate_commit,omitempty"`
-	OSDTags            *string `json:"osd_tags,omitempty"`
-	UsedForApp         *string `json:"used_for_app,omitempty"`
+	Name                string  `json:"name"`
+	Scheme              string  `json:"scheme"`
+	PGSize              int32   `json:"pg_size"`
+	ParityChunks        *int32  `json:"parity_chunks,omitempty"`
+	PGMinSize           int32   `json:"pg_minsize"`
+	PGCount             int32   `json:"pg_count"`
+	FailureDomain       *string `json:"failure_domain,omitempty"`
+	LevelPlacement      *string `json:"level_placement,omitempty"`
+	RawPlacement        *string `json:"raw_placement,omitempty"`
+	LocalReads          *string `json:"local_reads,omitempty"`
+	MaxOSDCombinations  *int32  `json:"max_osd_combinations,omitempty"`
+	BlockSize           *int32  `json:"block_size,omitempty"`
+	BitmapGranularity   *int32  `json:"bitmap_granularity,omitempty"`
+	ImmediateCommit     *string `json:"immediate_commit,omitempty"`
+	PGStripeSize        *int32  `json:"pg_stripe_size,omitempty"`
+	RootNode            *string `json:"root_node,omitempty"`
+	OSDTags             *string `json:"osd_tags,omitempty"`
+	PrimaryAffinityTags *string `json:"primary_affinity_tags,omitempty"`
+	ScrubInterval       *string `json:"scrub_interval,omitempty"`
+	UsedForApp          *string `json:"used_for_app,omitempty"`
+}
+
+// VitastorClusterStats represents pool stats from Vitastor etcd
+type VitastorClusterStats struct {
+	PoolStats map[string]VitastorPoolStatEntry `json:"pool_stats"`
+}
+
+type VitastorPoolStatEntry struct {
+	TotalRaw   float64 `json:"total_raw"`        // bytes
+	UsedRaw    float64 `json:"used_raw"`         // bytes
+	Efficiency float64 `json:"space_efficiency"` // ratio
 }
 
 const poolFinalizer = "vitastor.io/pool-finalizer"
@@ -63,13 +84,10 @@ const poolFinalizer = "vitastor.io/pool-finalizer"
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorpools/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=control.vitastor.io,resources=vitastorpools/finalizers,verbs=update
 //+kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the VitastorPool object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
@@ -98,6 +116,11 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	poolsPath := config.VitastorPrefix + "/config/pools"
+
+	// Handle deletion
+	if !vitastorPool.DeletionTimestamp.IsZero() {
+		return r.handlePoolDeletion(ctx, &vitastorPool, cli, poolsPath)
+	}
 
 	// Add Finalizer if missing
 	if !controllerutil.ContainsFinalizer(&vitastorPool, poolFinalizer) {
@@ -130,7 +153,7 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// 2. Логика получения/генерации ID
 	if poolID == int32(0) {
 		// ID еще не назначен. Нужно сходить в Etcd и либо найти существующий, либо создать новый.
-		assignedID, err := r.getOrCreatePoolID(ctx, cli, poolsPath, vitastorPool.Spec.Name, &vitastorPool)
+		assignedID, err := r.getOrCreatePoolID(ctx, cli, poolsPath, vitastorPool.Name, &vitastorPool)
 		if err != nil {
 			// Если ошибка оптимистичной блокировки (кто-то другой писал в это время),
 			// просто вернем ошибку, контроллер перезапустится и попробует снова.
@@ -169,7 +192,7 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if errors.IsNotFound(err) {
 			// StorageClass for that pool not found - creating new one
 			log.Info("StorageClass is not found, creating new one")
-			sc, err := r.getStorageClassConfig(&vitastorPool, vitastorPool.Spec.VitastorFS, &config)
+			sc, err := r.getStorageClassConfig(&vitastorPool, vitastorPool.Spec.VitastorFS)
 			if err != nil {
 				log.Error(err, "Failed to create storage class for that pool")
 				return ctrl.Result{}, err
@@ -182,16 +205,125 @@ func (r *VitastorPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				log.Error(err, "Failed to create StorageClass")
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{Requeue: true}, err
+			return ctrl.Result{Requeue: true}, nil
 		}
 		log.Error(err, "Unable to get StorageClass")
 		return ctrl.Result{}, err
 	}
 
+	// Update pool usage statistics (non-fatal)
+	if err := r.updatePoolStatus(ctx, &vitastorPool, cli, config.VitastorPrefix); err != nil {
+		log.Error(err, "Failed to update pool status stats (non-fatal)")
+	}
+
 	return ctrl.Result{}, nil
 }
 
-func (r *VitastorPoolReconciler) getStorageClassConfig(pool *controlv2.VitastorPool, vitastorfs bool, config *VitastorConfig) (*storage.StorageClass, error) {
+func (r *VitastorPoolReconciler) handlePoolDeletion(ctx context.Context, vitastorPool *controlv2.VitastorPool, cli *clientv3.Client, poolsPath string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	if !controllerutil.ContainsFinalizer(vitastorPool, poolFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	// Safety check: block deletion if PersistentVolumes still use this pool's StorageClass
+	pvList := &corev1.PersistentVolumeList{}
+	if err := r.List(ctx, pvList); err != nil {
+		log.Error(err, "Failed to list PersistentVolumes during pool deletion")
+		return ctrl.Result{}, err
+	}
+	inUsePVs := []string{}
+	for _, pv := range pvList.Items {
+		if pv.Spec.StorageClassName == vitastorPool.Name {
+			inUsePVs = append(inUsePVs, pv.Name)
+		}
+	}
+	if len(inUsePVs) > 0 {
+		log.Info("Pool deletion blocked: PersistentVolumes still exist", "pool", vitastorPool.Name, "pvs", inUsePVs)
+		// Update status condition to reflect blocked deletion
+		apimeta.SetStatusCondition(&vitastorPool.Status.Conditions, metav1.Condition{
+			Type:    "Deleting",
+			Status:  metav1.ConditionFalse,
+			Reason:  "PVsExist",
+			Message: fmt.Sprintf("Cannot delete pool: %d PersistentVolume(s) still reference this pool's StorageClass: %v", len(inUsePVs), inUsePVs),
+		})
+		if err := r.Status().Update(ctx, vitastorPool); err != nil {
+			log.Error(err, "Failed to update pool status during blocked deletion")
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// Remove pool from etcd
+	poolID := vitastorPool.Status.ID
+	if poolID != 0 {
+		resp, err := cli.Get(ctx, poolsPath)
+		if err != nil {
+			log.Error(err, "Failed to get pools config during deletion")
+			return ctrl.Result{}, err
+		}
+		if resp.Count > 0 {
+			var pools map[string]VitastorPoolConfig
+			if err := json.Unmarshal(resp.Kvs[0].Value, &pools); err != nil {
+				log.Error(err, "Failed to parse pools config during deletion")
+				return ctrl.Result{}, err
+			}
+			strPoolID := strconv.Itoa(int(poolID))
+			if _, exists := pools[strPoolID]; exists {
+				delete(pools, strPoolID)
+				poolsBytes, err := json.Marshal(pools)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				if _, err := cli.Put(ctx, poolsPath, string(poolsBytes)); err != nil {
+					log.Error(err, "Failed to remove pool from etcd during deletion")
+					return ctrl.Result{}, err
+				}
+				log.Info("Removed pool from etcd", "poolID", poolID, "pool", vitastorPool.Name)
+			}
+		}
+	}
+
+	// Remove finalizer so Kubernetes can complete the deletion (StorageClass is cleaned up via OwnerReference)
+	controllerutil.RemoveFinalizer(vitastorPool, poolFinalizer)
+	if err := r.Update(ctx, vitastorPool); err != nil {
+		return ctrl.Result{}, err
+	}
+	log.Info("Pool deleted successfully", "pool", vitastorPool.Name)
+	return ctrl.Result{}, nil
+}
+
+func (r *VitastorPoolReconciler) updatePoolStatus(ctx context.Context, vitastorPool *controlv2.VitastorPool, cli *clientv3.Client, prefix string) error {
+	statsResp, err := cli.Get(ctx, prefix+"/stats")
+	if err != nil || statsResp.Count == 0 {
+		return err
+	}
+
+	var clusterStats VitastorClusterStats
+	if err := json.Unmarshal(statsResp.Kvs[0].Value, &clusterStats); err != nil {
+		return nil // stats format unknown, skip
+	}
+
+	poolIDStr := strconv.Itoa(int(vitastorPool.Status.ID))
+	entry, ok := clusterStats.PoolStats[poolIDStr]
+	if !ok {
+		return nil // not yet in stats
+	}
+
+	usedPct := float64(0)
+	if entry.TotalRaw > 0 {
+		usedPct = entry.UsedRaw / entry.TotalRaw * 100
+	}
+
+	vitastorPool.Status.Total = int64(entry.TotalRaw)
+	vitastorPool.Status.Used = int64(entry.UsedRaw)
+	vitastorPool.Status.Available = int64(entry.TotalRaw - entry.UsedRaw)
+	vitastorPool.Status.UsedPercent = fmt.Sprintf("%.1f%%", usedPct)
+	vitastorPool.Status.Efficiency = fmt.Sprintf("%.2f", entry.Efficiency)
+
+	return r.Status().Update(ctx, vitastorPool)
+}
+
+func (r *VitastorPoolReconciler) getStorageClassConfig(pool *controlv2.VitastorPool, vitastorfs bool) (*storage.StorageClass, error) {
 
 	storageClassParameters := map[string]string{
 		"volumePrefix": "",
@@ -213,16 +345,25 @@ func (r *VitastorPoolReconciler) getStorageClassConfig(pool *controlv2.VitastorP
 
 func (r *VitastorPoolReconciler) getPoolConfig(vitastorPool *controlv2.VitastorPool) VitastorPoolConfig {
 	poolSpec := VitastorPoolConfig{
-		Name:               vitastorPool.Name,
-		Scheme:             vitastorPool.Spec.Scheme,
-		PGSize:             vitastorPool.Spec.PGSize,
-		PGMinSize:          vitastorPool.Spec.PGMinSize,
-		ParityChunks:       vitastorPool.Spec.ParityChunks,
-		PGCount:            vitastorPool.Spec.PGCount,
-		FailureDomain:      vitastorPool.Spec.FailureDomain,
-		MaxOSDCombinations: vitastorPool.Spec.MaxOSDCombinations,
-		BlockSize:          vitastorPool.Spec.BlockSize,
-		ImmediateCommit:    vitastorPool.Spec.ImmediateCommit,
+		Name:                vitastorPool.Name,
+		Scheme:              vitastorPool.Spec.Scheme,
+		PGSize:              vitastorPool.Spec.PGSize,
+		PGMinSize:           vitastorPool.Spec.PGMinSize,
+		ParityChunks:        vitastorPool.Spec.ParityChunks,
+		PGCount:             vitastorPool.Spec.PGCount,
+		FailureDomain:       vitastorPool.Spec.FailureDomain,
+		LevelPlacement:      vitastorPool.Spec.LevelPlacement,
+		RawPlacement:        vitastorPool.Spec.RawPlacement,
+		LocalReads:          vitastorPool.Spec.LocalReads,
+		MaxOSDCombinations:  vitastorPool.Spec.MaxOSDCombinations,
+		BlockSize:           vitastorPool.Spec.BlockSize,
+		BitmapGranularity:   vitastorPool.Spec.BitmapGranularity,
+		ImmediateCommit:     vitastorPool.Spec.ImmediateCommit,
+		PGStripeSize:        vitastorPool.Spec.PGStripeSize,
+		RootNode:            vitastorPool.Spec.RootNode,
+		OSDTags:             vitastorPool.Spec.OSDTags,
+		PrimaryAffinityTags: vitastorPool.Spec.PrimaryAffinityTags,
+		ScrubInterval:       vitastorPool.Spec.ScrubInterval,
 	}
 	if vitastorPool.Spec.VitastorFS {
 		appname := "fs:k8s-rwx"

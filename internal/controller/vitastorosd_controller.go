@@ -21,10 +21,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"os/exec"
+	"fmt"
 	"strconv"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
+)
+
+const (
+	OSDStateRunning        = "Running"
+	OSDStateUpdateRequired = "UpdateRequired"
+	OSDStateUpdating       = "Updating"
 )
 
 // VitastorOSDReconciler reconciles a VitastorOSD object
@@ -53,13 +60,14 @@ func (r *VitastorOSDReconciler) getConfiguration(osd *controlv2.VitastorOSD, clu
 	labels := map[string]string{
 		"control.vitastor.io/cluster": cluster.Name,
 		"control.vitastor.io/node":    osd.Labels["control.vitastor.io/node"],
-		"control.vitator.io/disk":     osd.Labels["control.vitastor.io/disk"],
+		"control.vitastor.io/disk":    osd.Labels["control.vitastor.io/disk"],
 	}
 
 	pod := corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{
-			Labels: labels,
-			Name:   "vitastor-osd-" + strconv.Itoa(int(osd.Spec.Id)),
+			Labels:      labels,
+			Annotations: map[string]string{},
+			Name:        "vitastor-osd-" + strconv.Itoa(int(osd.Spec.Id)),
 		},
 		Spec: corev1.PodSpec{
 			NodeName: osd.Labels["control.vitastor.io/node"],
@@ -160,14 +168,16 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if vitastorOSD.Status.State == "updateRequired" {
+	if vitastorOSD.Status.State == OSDStateUpdateRequired {
 		if ownerCluster.Status.ActiveOSD == vitastorOSD.Name {
-			vitastorOSD.Status.State = "updating"
+			vitastorOSD.Status.State = OSDStateUpdating
 			if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
 				log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
 				return ctrl.Result{}, err
 			}
-			setNoout(&vitastorOSD, true)
+			if err := r.syncOSDConfigToEtcd(ctx, &vitastorOSD); err != nil {
+				log.Error(err, "Failed to sync OSD config to etcd during update", "osd", vitastorOSD.Spec.Id)
+			}
 		}
 	}
 
@@ -217,7 +227,7 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	if foundOsdPod.Annotations["control.vitastor.io/content-hash"] != contentHash {
 		log.Info("OSD image mismatch, updating state", "osd", vitastorOSD.Spec.Id)
-		vitastorOSD.Status.State = "updateRequired"
+		vitastorOSD.Status.State = OSDStateUpdateRequired
 		if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
 			log.Error(err, "failed to update OSD status", "osd.Name", vitastorOSD.Name)
 			return ctrl.Result{}, err
@@ -225,11 +235,16 @@ func (r *VitastorOSDReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
 	} else {
 		log.Info("OSD started", "osd", vitastorOSD.Spec.Id)
-		vitastorOSD.Status.State = "running"
-		setNoout(&vitastorOSD, false)
+		vitastorOSD.Status.State = OSDStateRunning
 		if err := r.Status().Update(ctx, &vitastorOSD); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Sync OSD maintenance config (noout, weight, tags) to Vitastor etcd
+	if err := r.syncOSDConfigToEtcd(ctx, &vitastorOSD); err != nil {
+		log.Error(err, "Failed to sync OSD config to etcd", "osd", vitastorOSD.Spec.Id)
+		// Non-fatal: log and continue, will retry on next reconcile
 	}
 
 	return ctrl.Result{}, nil
@@ -261,9 +276,61 @@ func contentHash(pod *corev1.Pod) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func setNoout(osd *controlv2.VitastorOSD, value bool) error {
-	osdId := strconv.Itoa(int(osd.Spec.Id))
-	return exec.Command("vitastor-cli", "modify-osd", "--noout", strconv.FormatBool(value), osdId).Run()
+// OSDEtcdConfig represents the OSD-specific configuration stored in Vitastor etcd.
+type OSDEtcdConfig struct {
+	Noout    bool     `json:"noout,omitempty"`
+	Reweight *float64 `json:"reweight,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+}
+
+func (r *VitastorOSDReconciler) syncOSDConfigToEtcd(ctx context.Context, osd *controlv2.VitastorOSD) error {
+	config, err := loadConfiguration(ctx, "/etc/vitastor/vitastor.conf")
+	if err != nil {
+		return fmt.Errorf("loading vitastor.conf: %w", err)
+	}
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   config.VitastorEtcdUrls,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return fmt.Errorf("connecting to etcd: %w", err)
+	}
+	defer cli.Close()
+
+	osdKey := fmt.Sprintf("%s/config/osd/%d", config.VitastorPrefix, osd.Spec.Id)
+
+	// Build desired config
+	desired := OSDEtcdConfig{
+		Noout: osd.Spec.NoOut,
+	}
+	// Parse weight as float64
+	if osd.Spec.Weight != "" {
+		var w float64
+		if _, err := fmt.Sscanf(osd.Spec.Weight, "%f", &w); err == nil {
+			desired.Reweight = &w
+		}
+	}
+	// Store tags as JSON array
+	if len(osd.Spec.Tags) > 0 {
+		desired.Tags = osd.Spec.Tags
+	}
+
+	desiredBytes, err := json.Marshal(desired)
+	if err != nil {
+		return err
+	}
+
+	// Read current value (idempotency check)
+	resp, err := cli.Get(ctx, osdKey)
+	if err != nil {
+		return err
+	}
+	if len(resp.Kvs) > 0 && string(resp.Kvs[0].Value) == string(desiredBytes) {
+		return nil // already in sync
+	}
+
+	_, err = cli.Put(ctx, osdKey, string(desiredBytes))
+	return err
 }
 
 // SetupWithManager sets up the controller with the Manager.

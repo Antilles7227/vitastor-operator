@@ -1,9 +1,24 @@
 apiVersion: control.vitastor.io/v2
 kind: VitastorCluster
 metadata:
-  labels:
-    app.kubernetes.io/name: vitastor-operator
-    app.kubernetes.io/managed-by: kustomize
   name: vitastorcluster-sample
 spec:
-  # TODO(user): Add fields here
+  vitastorNodeLabel: "vitastor-node"
+  vitastorClusterNamespace: "vitastor-system"
+  reconcilePeriodMin: 5
+  agent:
+    image: "vitalif/vitastor-csi:v2.4.0"
+  monitor:
+    image: "vitalif/vitastor:v2.4.0"
+    replicas: 3
+    osdOutTimeSecs: 600
+  osd:
+    image: "vitalif/vitastor:v2.4.0"
+    noRecovery: false
+    noRebalance: false
+  cluster:
+    immediateCommit: "none"
+    placementLevels:
+      host: 100
+      disk: 110
+      osd: 120

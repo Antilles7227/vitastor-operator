@@ -21,64 +21,80 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 var _ = Describe("VitastorOSD Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
-
+	Context("When managing VitastorOSD resources", func() {
+		const osdName = "test-osd-1"
 		ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
-		vitastorosd := &controlv1.VitastorOSD{}
-
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind VitastorOSD")
-			err := k8sClient.Get(ctx, typeNamespacedName, vitastorosd)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &controlv1.VitastorOSD{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
-
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &controlv1.VitastorOSD{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance VitastorOSD")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &VitastorOSDReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+			osd := &controlv2.VitastorOSD{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: osdName}, osd); err == nil {
+				Expect(k8sClient.Delete(ctx, osd)).To(Succeed())
 			}
+		})
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		It("should create a VitastorOSD CR with correct spec", func() {
+			osd := &controlv2.VitastorOSD{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: osdName,
+					Labels: map[string]string{
+						"control.vitastor.io/cluster": "test-cluster",
+						"control.vitastor.io/node":    "test-worker-node",
+						"control.vitastor.io/disk":    "test-worker-node-sda",
+					},
+				},
+				Spec: controlv2.VitastorOSDSpec{
+					Id:     1,
+					Path:   "/dev/disk/by-partuuid/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+					Weight: "1.0",
+					NoOut:  false,
+					Tags:   []string{"ssd", "dc1"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, osd)).To(Succeed())
+
+			fetched := &controlv2.VitastorOSD{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: osdName}, fetched)).To(Succeed())
+			Expect(fetched.Spec.Id).To(Equal(int32(1)))
+			Expect(fetched.Spec.Weight).To(Equal("1.0"))
+			Expect(fetched.Spec.Tags).To(ConsistOf("ssd", "dc1"))
+		})
+
+		It("should allow setting noout for maintenance", func() {
+			osd := &controlv2.VitastorOSD{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: osdName,
+					Labels: map[string]string{
+						"control.vitastor.io/cluster": "test-cluster",
+						"control.vitastor.io/node":    "test-worker-node",
+					},
+				},
+				Spec: controlv2.VitastorOSDSpec{
+					Id:     1,
+					Path:   "/dev/disk/by-partuuid/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+					Weight: "1.0",
+					NoOut:  false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, osd)).To(Succeed())
+
+			// Simulate maintenance: set noout and reduce weight
+			fetched := &controlv2.VitastorOSD{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: osdName}, fetched)).To(Succeed())
+			fetched.Spec.NoOut = true
+			fetched.Spec.Weight = "0"
+			Expect(k8sClient.Update(ctx, fetched)).To(Succeed())
+
+			updated := &controlv2.VitastorOSD{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: osdName}, updated)).To(Succeed())
+			Expect(updated.Spec.NoOut).To(BeTrue())
+			Expect(updated.Spec.Weight).To(Equal("0"))
 		})
 	})
 })

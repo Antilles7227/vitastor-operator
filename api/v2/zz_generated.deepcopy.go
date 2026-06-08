@@ -584,8 +584,23 @@ func (in *VitastorPoolSpec) DeepCopyInto(out *VitastorPoolSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.PGStripeSize != nil {
+		in, out := &in.PGStripeSize, &out.PGStripeSize
+		*out = new(int32)
+		**out = **in
+	}
+	if in.RootNode != nil {
+		in, out := &in.RootNode, &out.RootNode
+		*out = new(string)
+		**out = **in
+	}
 	if in.OSDTags != nil {
 		in, out := &in.OSDTags, &out.OSDTags
+		*out = new(string)
+		**out = **in
+	}
+	if in.PrimaryAffinityTags != nil {
+		in, out := &in.PrimaryAffinityTags, &out.PrimaryAffinityTags
 		*out = new(string)
 		**out = **in
 	}

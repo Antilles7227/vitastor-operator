@@ -144,7 +144,17 @@ spec:
     storage: false
     subresources:
       status: {}
-  - name: v2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.noout
+      name: NoOut
+      type: boolean
+    - jsonPath: .spec.weight
+      name: Weight
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: VitastorNode is the Schema for the vitastornodes API

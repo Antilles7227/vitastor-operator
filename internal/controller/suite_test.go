@@ -32,7 +32,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
 	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 	// +kubebuilder:scaffold:imports
 )
@@ -60,9 +59,6 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = controlv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
 	err = controlv2.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 

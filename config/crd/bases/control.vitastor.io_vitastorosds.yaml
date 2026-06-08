@@ -70,7 +70,23 @@ spec:
     storage: false
     subresources:
       status: {}
-  - name: v2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.id
+      name: OSD ID
+      type: integer
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.noout
+      name: NoOut
+      type: boolean
+    - jsonPath: .spec.weight
+      name: Weight
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: VitastorOSD is the Schema for the vitastorosds API

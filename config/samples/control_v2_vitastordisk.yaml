@@ -1,9 +1,12 @@
 apiVersion: control.vitastor.io/v2
 kind: VitastorDisk
 metadata:
+  name: worker-node-1-sda
   labels:
-    app.kubernetes.io/name: vitastor-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: vitastordisk-sample
+    control.vitastor.io/cluster: vitastorcluster-sample
+    control.vitastor.io/node: worker-node-1
 spec:
-  # TODO(user): Add fields here
+  devicePath: "/dev/sda"
+  nodeRef: "worker-node-1"
+  desiredState: "Discovered"
+  desiredOSDCount: 1

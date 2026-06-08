@@ -19,13 +19,14 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"go.etcd.io/etcd/client/v3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -125,6 +126,12 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	defer cli.Close()
 
+	// Propagate node-level noout to all owned OSDs
+	if err := r.reconcileNodeNoOut(ctx, &vitastorNode); err != nil {
+		log.Error(err, "Failed to reconcile node noout")
+		// Non-fatal, continue
+	}
+
 	placementLevelCluster := make([]string, 0, len(ownerCluster.Spec.ClusterParameters.PlacementLevels))
 	for k := range ownerCluster.Spec.ClusterParameters.PlacementLevels {
 		placementLevelCluster = append(placementLevelCluster, k)
@@ -139,52 +146,26 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Check node placement and set if empty
 	log.Info("Checking node_placement config")
 	nodePlacementPath := config.VitastorPrefix + "/config/node_placement"
-	placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
-	if err != nil {
-		log.Error(err, "Unable to retrieve placement tree")
-		return ctrl.Result{}, err
-	}
-	var placementLevel map[string]VitastorNodePlacement
-	if placementLevelRaw.Count != 0 {
-		err = json.Unmarshal(placementLevelRaw.Kvs[0].Value, &placementLevel)
-		if err != nil {
-			log.Error(err, "Unable to parse placement level block")
-			return ctrl.Result{}, err
-		}
-	} else {
-		placementLevel = make(map[string]VitastorNodePlacement)
-	}
-	placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host"}
-	// Check if node has fd.vitastor.io labels
+	// Determine parent from fd.vitastor.io labels
 	// TODO: If there are more than 1 FD label that code will fail, need to refactor it to proper FD chaining
+	parentValue := ""
 	for label, value := range k8sNode.Labels {
 		if strings.Contains(label, "fd.vitastor.io") {
 			splittedLabel := strings.Split(label, "/")
 			if contains_str_list(placementLevelCluster, splittedLabel[1]) {
-				// Node labeled properly, check if that label exist in placements
-				_, ok := placementLevel[value]
-				// If the key not exists
-				if !ok {
-					placementLevel[value] = VitastorNodePlacement{Level: splittedLabel[1]}
+				// Add FD label value as a placement level
+				if err := r.updatePlacementEntry(ctx, cli, nodePlacementPath, value, VitastorNodePlacement{Level: splittedLabel[1]}); err != nil {
+					log.Error(err, "Failed to update FD placement entry")
+					return ctrl.Result{}, err
 				}
-				// Updating placement level with proper parent
-				placementLevel[vitastorNode.Name] = VitastorNodePlacement{Level: "host", Parent: value}
+				parentValue = value
 			}
 		}
 	}
-
-	var placementLevelBytes []byte
-	placementLevelBytes, err = json.Marshal(placementLevel)
-	if err != nil {
-		log.Error(err, "Unable to marshal placement level block")
+	if err := r.updatePlacementEntry(ctx, cli, nodePlacementPath, vitastorNode.Name, VitastorNodePlacement{Level: "host", Parent: parentValue}); err != nil {
+		log.Error(err, "Failed to update node placement entry")
 		return ctrl.Result{}, err
 	}
-	placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-	if err != nil {
-		log.Error(err, "Unable to update placement level tree")
-		return ctrl.Result{}, err
-	}
-	log.Info(placementLevelResp.Header.String())
 
 	// Update status with OSDs
 	agentList := &corev1.PodList{}
@@ -206,7 +187,10 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	systemDisksURL := "http://" + agentIP + ":8000/disk"
 
 	// Getting all disks on that node
-	resp, err := http.Get(systemDisksURL)
+	if r.HttpClient == nil {
+		r.HttpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := r.HttpClient.Get(systemDisksURL)
 	if err != nil {
 		log.Error(err, "Unable to get system disks")
 		return ctrl.Result{}, err
@@ -217,7 +201,10 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 	var systemDisks []SystemDisk
-	json.Unmarshal(body, &systemDisks)
+	if err := json.Unmarshal(body, &systemDisks); err != nil {
+		log.Error(err, "Unable to parse agent disk response")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	resp.Body.Close()
 	var systemDisksPaths []string = make([]string, len(systemDisks))
 	for _, disk := range systemDisks {
@@ -239,31 +226,11 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	for _, disk := range systemDisks {
 		if contains(diskList.Items, disk.Name) {
 			// That disk already working in cluster, updating node placement and skip
-			// Check node placement and set if empty
-			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
-			if err != nil {
-				log.Error(err, "Unable to retrieve placement tree")
+			diskPlacementKey := vitastorNode.Name + "_" + strings.TrimPrefix(disk.Name, "/dev/")
+			if err := r.updatePlacementEntry(ctx, cli, nodePlacementPath, diskPlacementKey, VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}); err != nil {
+				log.Error(err, "Failed to update disk placement entry")
 				return ctrl.Result{}, err
 			}
-			var placementLevel map[string]VitastorNodePlacement
-			err = json.Unmarshal(placementLevelRaw.Kvs[0].Value, &placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to parse placement level block")
-				return ctrl.Result{}, err
-			}
-			placementLevel[vitastorNode.Name+"_"+strings.TrimPrefix(disk.Name, "/dev/")] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
-			var placementLevelBytes []byte
-			placementLevelBytes, err = json.Marshal(placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to marshal placement level block")
-				return ctrl.Result{}, err
-			}
-			placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-			if err != nil {
-				log.Error(err, "Unable to update placement level tree")
-				return ctrl.Result{}, err
-			}
-			log.Info(placementLevelResp.Header.String())
 			continue
 		} else {
 			// Disk not deployed, need to create CRD
@@ -273,37 +240,15 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, err
 			}
 			log.Info("Deploying new Disk", "diskName", new_disk.Name)
-			err := r.Create(ctx, new_disk)
-			if err != nil {
+			if err := r.Create(ctx, new_disk); err != nil {
 				log.Error(err, "Failed to create new OSD")
 				return ctrl.Result{}, err
 			}
 
-			// Check node placement and set if empty
-			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
-			if err != nil {
-				log.Error(err, "Unable to retrieve placement tree")
+			if err := r.updatePlacementEntry(ctx, cli, nodePlacementPath, new_disk.Name, VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}); err != nil {
+				log.Error(err, "Failed to update disk placement entry")
 				return ctrl.Result{}, err
 			}
-			var placementLevel map[string]VitastorNodePlacement
-			err = json.Unmarshal(placementLevelRaw.Kvs[0].Value, &placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to parse placement level block")
-				return ctrl.Result{}, err
-			}
-			placementLevel[new_disk.Name] = VitastorNodePlacement{Level: "disk", Parent: vitastorNode.Name}
-			var placementLevelBytes []byte
-			placementLevelBytes, err = json.Marshal(placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to marshal placement level block")
-				return ctrl.Result{}, err
-			}
-			placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-			if err != nil {
-				log.Error(err, "Unable to update placement level tree")
-				return ctrl.Result{}, err
-			}
-			log.Info(placementLevelResp.Header.String())
 		}
 	}
 
@@ -315,35 +260,14 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			continue
 		} else {
 			// Disk disappeared, deleting CR and updating node placement
-			placementLevelRaw, err := cli.Get(ctx, nodePlacementPath)
-			if err != nil {
-				log.Error(err, "Unable to retrieve placement tree")
+			if err := r.deletePlacementEntry(ctx, cli, nodePlacementPath, disk.Name); err != nil {
+				log.Error(err, "Failed to delete disk placement entry")
 				return ctrl.Result{}, err
 			}
-			var placementLevel map[string]VitastorNodePlacement
-			err = json.Unmarshal(placementLevelRaw.Kvs[0].Value, &placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to parse placement level block")
-				return ctrl.Result{}, err
-			}
-			delete(placementLevel, disk.Name)
-			var placementLevelBytes []byte
-			placementLevelBytes, err = json.Marshal(placementLevel)
-			if err != nil {
-				log.Error(err, "Unable to marshal placement level block")
-				return ctrl.Result{}, err
-			}
-			placementLevelResp, err := cli.Put(ctx, nodePlacementPath, string(placementLevelBytes))
-			if err != nil {
-				log.Error(err, "Unable to update placement level tree")
-				return ctrl.Result{}, err
-			}
-			log.Info(placementLevelResp.Header.String())
 
 			log.Info("Deleting Disk...", "diskName", disk.Name)
 
-			err = r.Delete(ctx, &disk)
-			if err != nil {
+			if err := r.Delete(ctx, &disk); err != nil {
 				log.Error(err, "Failed to delete disk")
 				return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, err
 			}
@@ -351,6 +275,77 @@ func (r *VitastorNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	log.Info("Reconciling is done")
 	return ctrl.Result{RequeueAfter: time.Duration(ownerCluster.Spec.ReconcilePeriodMin) * time.Minute}, nil
+}
+
+// updatePlacementEntry atomically reads the node_placement map from etcd,
+// applies the given modification, and writes it back.
+func (r *VitastorNodeReconciler) updatePlacementEntry(ctx context.Context, cli *clientv3.Client, path string, key string, placement VitastorNodePlacement) error {
+	log := log.FromContext(ctx)
+
+	resp, err := cli.Get(ctx, path)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve placement tree: %w", err)
+	}
+
+	var placementLevel map[string]VitastorNodePlacement
+	if resp.Count != 0 {
+		if err := json.Unmarshal(resp.Kvs[0].Value, &placementLevel); err != nil {
+			return fmt.Errorf("unable to parse placement level block: %w", err)
+		}
+	} else {
+		placementLevel = make(map[string]VitastorNodePlacement)
+	}
+
+	placementLevel[key] = placement
+
+	placementLevelBytes, err := json.Marshal(placementLevel)
+	if err != nil {
+		return fmt.Errorf("unable to marshal placement level block: %w", err)
+	}
+
+	putResp, err := cli.Put(ctx, path, string(placementLevelBytes))
+	if err != nil {
+		return fmt.Errorf("unable to update placement level tree: %w", err)
+	}
+	log.Info("Updated placement level", "key", key, "revision", putResp.Header.Revision)
+	return nil
+}
+
+// deletePlacementEntry atomically reads the node_placement map from etcd,
+// removes the given key, and writes it back.
+func (r *VitastorNodeReconciler) deletePlacementEntry(ctx context.Context, cli *clientv3.Client, path string, key string) error {
+	log := log.FromContext(ctx)
+
+	resp, err := cli.Get(ctx, path)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve placement tree: %w", err)
+	}
+	if resp.Count == 0 {
+		return nil // nothing to delete
+	}
+
+	var placementLevel map[string]VitastorNodePlacement
+	if err := json.Unmarshal(resp.Kvs[0].Value, &placementLevel); err != nil {
+		return fmt.Errorf("unable to parse placement level block: %w", err)
+	}
+
+	if _, exists := placementLevel[key]; !exists {
+		return nil // already not present
+	}
+
+	delete(placementLevel, key)
+
+	placementLevelBytes, err := json.Marshal(placementLevel)
+	if err != nil {
+		return fmt.Errorf("unable to marshal placement level block: %w", err)
+	}
+
+	putResp, err := cli.Put(ctx, path, string(placementLevelBytes))
+	if err != nil {
+		return fmt.Errorf("unable to update placement level tree: %w", err)
+	}
+	log.Info("Removed placement entry", "key", key, "revision", putResp.Header.Revision)
+	return nil
 }
 
 func contains(diskList []controlv2.VitastorDisk, diskName string) bool {
@@ -386,6 +381,30 @@ func (r *VitastorNodeReconciler) getDiskConfiguration(diskPath string, node *con
 		},
 	}
 	return disk
+}
+
+func (r *VitastorNodeReconciler) reconcileNodeNoOut(ctx context.Context, vitastorNode *controlv2.VitastorNode) error {
+	log := log.FromContext(ctx)
+
+	// List all OSDs owned by this node
+	osdList := &controlv2.VitastorOSDList{}
+	if err := r.List(ctx, osdList, client.MatchingLabels{
+		"control.vitastor.io/node": vitastorNode.Name,
+	}); err != nil {
+		return fmt.Errorf("listing OSDs for node %s: %w", vitastorNode.Name, err)
+	}
+
+	for _, osd := range osdList.Items {
+		if osd.Spec.NoOut != vitastorNode.Spec.NoOut {
+			osd.Spec.NoOut = vitastorNode.Spec.NoOut
+			if err := r.Update(ctx, &osd); err != nil {
+				log.Error(err, "Failed to update OSD noout", "osd", osd.Name)
+				return err
+			}
+			log.Info("Propagated node noout to OSD", "node", vitastorNode.Name, "osd", osd.Name, "noout", vitastorNode.Spec.NoOut)
+		}
+	}
+	return nil
 }
 
 func loadConfiguration(ctx context.Context, file string) (VitastorConfig, error) {

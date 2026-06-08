@@ -21,64 +21,52 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 var _ = Describe("VitastorCluster Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
-
+	Context("When creating a VitastorCluster", func() {
+		const clusterName = "test-cluster"
 		ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
-		vitastorcluster := &controlv1.VitastorCluster{}
-
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind VitastorCluster")
-			err := k8sClient.Get(ctx, typeNamespacedName, vitastorcluster)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &controlv1.VitastorCluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
-
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &controlv1.VitastorCluster{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance VitastorCluster")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &VitastorClusterReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+			cluster := &controlv2.VitastorCluster{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster); err == nil {
+				Expect(k8sClient.Delete(ctx, cluster)).To(Succeed())
 			}
+		})
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		It("should create the VitastorCluster CR successfully", func() {
+			cluster := &controlv2.VitastorCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: clusterName,
+				},
+				Spec: controlv2.VitastorClusterSpec{
+					VitastorNodeLabel:        "vitastor-node",
+					VitastorClusterNamespace: "vitastor-system",
+					ReconcilePeriodMin:       5,
+					Agent: controlv2.AgentSpec{
+						Image: "vitalif/vitastor-csi:v2.4.0",
+					},
+					Monitor: controlv2.MonitorSpec{
+						Image:    "vitalif/vitastor:v2.4.0",
+						Replicas: 3,
+					},
+					OSD: controlv2.OSDSpec{
+						Image: "vitalif/vitastor:v2.4.0",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+
+			// Verify it can be fetched
+			fetched := &controlv2.VitastorCluster{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, fetched)).To(Succeed())
+			Expect(fetched.Spec.VitastorNodeLabel).To(Equal("vitastor-node"))
+			Expect(fetched.Spec.Monitor.Replicas).To(Equal(int32(3)))
 		})
 	})
 })

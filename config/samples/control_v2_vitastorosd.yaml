@@ -1,9 +1,14 @@
 apiVersion: control.vitastor.io/v2
 kind: VitastorOSD
 metadata:
+  name: vitastorcluster-sample-osd-1
   labels:
-    app.kubernetes.io/name: vitastor-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: vitastorosd-sample
+    control.vitastor.io/cluster: vitastorcluster-sample
+    control.vitastor.io/node: worker-node-1
+    control.vitastor.io/disk: worker-node-1-sda
 spec:
-  # TODO(user): Add fields here
+  id: 1
+  path: "/dev/disk/by-partuuid/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  weight: "1.0"
+  noout: false
+  tags: []

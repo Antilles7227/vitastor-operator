@@ -170,9 +170,9 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 	// Resources
-	if !reflect.DeepEqual(monitorDeployment.Spec.Template.Spec.Resources, &vitastorCluster.Spec.Monitor.Resources) {
+	if !reflect.DeepEqual(monitorDeployment.Spec.Template.Spec.Containers[0].Resources, vitastorCluster.Spec.Monitor.Resources) {
 		log.Info("resources of monitor deployment differs, updating")
-		monitorDeployment.Spec.Template.Spec.Resources = &vitastorCluster.Spec.Monitor.Resources
+		monitorDeployment.Spec.Template.Spec.Containers[0].Resources = vitastorCluster.Spec.Monitor.Resources
 		if err := r.Update(ctx, monitorDeployment); err != nil {
 			log.Error(err, "Failed to update monitor deployment during resource requirement change")
 			return ctrl.Result{}, err
@@ -214,9 +214,9 @@ func (r *VitastorClusterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 	// Resources
-	if !reflect.DeepEqual(agentDaemonSet.Spec.Template.Spec.Resources, &vitastorCluster.Spec.Agent.Resources) {
+	if !reflect.DeepEqual(agentDaemonSet.Spec.Template.Spec.Containers[0].Resources, vitastorCluster.Spec.Agent.Resources) {
 		log.Info("resources of agent daemonset differs, updating")
-		agentDaemonSet.Spec.Template.Spec.Resources = &vitastorCluster.Spec.Agent.Resources
+		agentDaemonSet.Spec.Template.Spec.Containers[0].Resources = vitastorCluster.Spec.Agent.Resources
 		if err := r.Update(ctx, agentDaemonSet); err != nil {
 			log.Error(err, "Failed to update agent daemonset during resource requirement change")
 			return ctrl.Result{}, err
@@ -304,7 +304,7 @@ func (r *VitastorClusterReconciler) reconcileRollingUpdates(ctx context.Context,
 			return r.Status().Update(ctx, cluster)
 		}
 
-		if activeOSD.Status.State == "Running" {
+		if activeOSD.Status.State == OSDStateRunning {
 			// TODO: Check rebalance status with cli
 			log.FromContext(ctx).Info("OSD updated successfully, releasing lock", "osd", activeOSDName)
 			cluster.Status.ActiveOSD = ""
@@ -315,7 +315,7 @@ func (r *VitastorClusterReconciler) reconcileRollingUpdates(ctx context.Context,
 	}
 
 	for _, osd := range osdList.Items {
-		if osd.Status.State == "updateRequired" {
+		if osd.Status.State == OSDStateUpdateRequired {
 			log.FromContext(ctx).Info("Locking cluster for OSD update", "osd", osd.Name)
 			cluster.Status.ActiveOSD = osd.Name
 			return r.Status().Update(ctx, cluster)

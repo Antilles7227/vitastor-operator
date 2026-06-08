@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - nodes
+  - persistentvolumes
   - pods
   verbs:
   - get
@@ -96,18 +97,6 @@ rules:
   - v1
   resources:
   - pods
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - vitastor.io
-  resources:
-  - vitastorosds
   verbs:
   - create
   - delete

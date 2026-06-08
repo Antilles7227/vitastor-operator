@@ -1,9 +1,12 @@
 apiVersion: control.vitastor.io/v2
 kind: VitastorPool
 metadata:
-  labels:
-    app.kubernetes.io/name: vitastor-operator
-    app.kubernetes.io/managed-by: kustomize
   name: vitastorpool-sample
 spec:
-  # TODO(user): Add fields here
+  scheme: "replicated"
+  pgSize: 2
+  pgMinSize: 1
+  pgCount: 32
+  failureDomain: "host"
+  vitastorFS: false
+  immediateCommit: "none"

@@ -14,7 +14,23 @@ spec:
     singular: vitastordisk
   scope: Cluster
   versions:
-  - name: v2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.nodeRef
+      name: Node
+      type: string
+    - jsonPath: .spec.devicePath
+      name: Device
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.type
+      name: Type
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: VitastorDisk is the Schema for the vitastordisks API
@@ -46,7 +62,7 @@ spec:
                 enum:
                 - Discovered
                 - Prepared
-                - Dicommissioned
+                - Decommissioned
                 - Unknown
                 type: string
               devicePath:

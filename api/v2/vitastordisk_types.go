@@ -36,8 +36,15 @@ type VitastorDiskSpec struct {
 	NodeRef         string       `json:"nodeRef"`
 }
 
-// +kubebuilder:validation:Enum=Discovered;Prepared;Dicommissioned;Unknown
+// +kubebuilder:validation:Enum=Discovered;Prepared;Decommissioned;Unknown
 type DesiredState string
+
+const (
+	DiskStateDiscovered     DesiredState = "Discovered"
+	DiskStatePrepared       DesiredState = "Prepared"
+	DiskStateDecommissioned DesiredState = "Decommissioned"
+	DiskStateUnknown        DesiredState = "Unknown"
+)
 
 // VitastorDiskStatus defines the observed state of VitastorDisk.
 type VitastorDiskStatus struct {
@@ -70,7 +77,13 @@ type DiskType string
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeRef`
+// +kubebuilder:printcolumn:name="Device",type=string,JSONPath=`.spec.devicePath`
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.status.type`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // VitastorDisk is the Schema for the vitastordisks API
 type VitastorDisk struct {

@@ -85,7 +85,26 @@ spec:
     storage: false
     subresources:
       status: {}
-  - name: v2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.scheme
+      name: Scheme
+      type: string
+    - jsonPath: .spec.pgSize
+      name: PG Size
+      type: integer
+    - jsonPath: .spec.pgCount
+      name: PG Count
+      type: integer
+    - jsonPath: .status.id
+      name: Pool ID
+      type: integer
+    - jsonPath: .status.usedPercent
+      name: Used
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: VitastorPool is the Schema for the vitastorpools API
@@ -145,7 +164,14 @@ spec:
               pgSize:
                 format: int32
                 type: integer
+              pgStripeSize:
+                format: int32
+                type: integer
+              primaryAffinityTags:
+                type: string
               rawPlacement:
+                type: string
+              rootNode:
                 type: string
               scheme:
                 enum:
@@ -161,6 +187,9 @@ spec:
                 type: string
               vitastorFS:
                 type: boolean
+                x-kubernetes-validations:
+                - message: VitastorFS is immutable once set
+                  rule: self == oldSelf
             required:
             - name
             - pgCount

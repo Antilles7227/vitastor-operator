@@ -31,8 +31,9 @@ type VitastorPoolSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	Name       string `json:"name"`
-	VitastorFS bool   `json:"vitastorFS"`
+	Name string `json:"name"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="VitastorFS is immutable once set"
+	VitastorFS bool `json:"vitastorFS"`
 	// +kubebuilder:validation:Enum=replicated;xor;ec;jerasure
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Scheme is immutable"
 	Scheme string `json:"scheme"`
@@ -50,9 +51,15 @@ type VitastorPoolSpec struct {
 	MaxOSDCombinations *int32  `json:"maxOSDCombinations,omitempty"`
 	BlockSize          *int32  `json:"blockSize,omitempty"`
 	BitmapGranularity  *int32  `json:"bitmapGranularity,omitempty"`
-	ImmediateCommit    *string `json:"immediateCommit,omitempty"`
-	OSDTags            *string `json:"osdTags,omitempty"`
-	ScrubInterval      *string `json:"scrubInterval,omitempty"`
+	ImmediateCommit     *string `json:"immediateCommit,omitempty"`
+	// +optional
+	PGStripeSize *int32 `json:"pgStripeSize,omitempty"`
+	// +optional
+	RootNode *string `json:"rootNode,omitempty"`
+	OSDTags  *string `json:"osdTags,omitempty"`
+	// +optional
+	PrimaryAffinityTags *string `json:"primaryAffinityTags,omitempty"`
+	ScrubInterval       *string `json:"scrubInterval,omitempty"`
 }
 
 // VitastorPoolStatus defines the observed state of VitastorPool.
@@ -88,6 +95,12 @@ type VitastorPoolStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Scheme",type=string,JSONPath=`.spec.scheme`
+// +kubebuilder:printcolumn:name="PG Size",type=integer,JSONPath=`.spec.pgSize`
+// +kubebuilder:printcolumn:name="PG Count",type=integer,JSONPath=`.spec.pgCount`
+// +kubebuilder:printcolumn:name="Pool ID",type=integer,JSONPath=`.status.id`
+// +kubebuilder:printcolumn:name="Used",type=string,JSONPath=`.status.usedPercent`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // VitastorPool is the Schema for the vitastorpools API
 type VitastorPool struct {

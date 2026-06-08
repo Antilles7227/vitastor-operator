@@ -21,64 +21,82 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	controlv1 "gitlab.com/Antilles7227/vitastor-operator/api/v1"
+	controlv2 "gitlab.com/Antilles7227/vitastor-operator/api/v2"
 )
 
 var _ = Describe("VitastorPool Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
-
+	Context("When managing VitastorPool resources", func() {
+		const poolName = "test-pool"
 		ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
-		vitastorpool := &controlv1.VitastorPool{}
-
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind VitastorPool")
-			err := k8sClient.Get(ctx, typeNamespacedName, vitastorpool)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &controlv1.VitastorPool{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		AfterEach(func() {
+			pool := &controlv2.VitastorPool{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: poolName}, pool); err == nil {
+				// Remove finalizer if present so delete works
+				pool.Finalizers = nil
+				_ = k8sClient.Update(ctx, pool)
+				_ = k8sClient.Delete(ctx, pool)
 			}
 		})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &controlv1.VitastorPool{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+		It("should create a VitastorPool CR with correct spec", func() {
+			pool := &controlv2.VitastorPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: poolName,
+				},
+				Spec: controlv2.VitastorPoolSpec{
+					Name:       poolName,
+					Scheme:     "replicated",
+					PGSize:     2,
+					PGMinSize:  1,
+					PGCount:    32,
+					VitastorFS: false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, pool)).To(Succeed())
 
-			By("Cleanup the specific resource instance VitastorPool")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			fetched := &controlv2.VitastorPool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: poolName}, fetched)).To(Succeed())
+			Expect(fetched.Spec.Scheme).To(Equal("replicated"))
+			Expect(fetched.Spec.PGSize).To(Equal(int32(2)))
+			Expect(fetched.Spec.PGCount).To(Equal(int32(32)))
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &VitastorPoolReconciler{
+
+		It("should fail reconciliation gracefully when vitastor.conf is not available", func() {
+			pool := &controlv2.VitastorPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: poolName,
+				},
+				Spec: controlv2.VitastorPoolSpec{
+					Name:      poolName,
+					Scheme:    "replicated",
+					PGSize:    2,
+					PGMinSize: 1,
+					PGCount:   32,
+				},
+			}
+			Expect(k8sClient.Create(ctx, pool)).To(Succeed())
+
+			reconciler := &VitastorPoolReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+			// Reconcile will fail because /etc/vitastor/vitastor.conf doesn't exist in test env
+			// but the CR itself should be intact
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: poolName},
 			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+			// Error expected (no vitastor.conf), but k8s CR operations are valid
+			Expect(err).To(HaveOccurred())
+
+			// CR should still exist
+			fetched := &controlv2.VitastorPool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: poolName}, fetched)).To(Succeed())
 		})
 	})
 })

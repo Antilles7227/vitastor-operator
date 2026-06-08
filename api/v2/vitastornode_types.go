@@ -61,6 +61,9 @@ type VitastorNodeStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="NoOut",type=boolean,JSONPath=`.spec.noout`
+// +kubebuilder:printcolumn:name="Weight",type=string,JSONPath=`.spec.weight`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // VitastorNode is the Schema for the vitastornodes API
 type VitastorNode struct {

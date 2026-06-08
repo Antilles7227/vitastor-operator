@@ -238,3 +238,13 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $$(realpath $(1)-$(3)) $(1)
 endef
+
+##@ Plugin
+
+.PHONY: build-plugin
+build-plugin: ## Build the kubectl-vitastor plugin binary.
+	cd plugin && go build -o ../bin/kubectl-vitastor .
+
+.PHONY: install-plugin
+install-plugin: build-plugin ## Install the kubectl-vitastor plugin to /usr/local/bin.
+	install -m 755 bin/kubectl-vitastor /usr/local/bin/kubectl-vitastor

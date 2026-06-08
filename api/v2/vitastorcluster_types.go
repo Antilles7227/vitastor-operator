@@ -132,6 +132,10 @@ type VitastorClusterStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Node Label",type=string,JSONPath=`.spec.vitastorNodeLabel`
+// +kubebuilder:printcolumn:name="Monitors",type=integer,JSONPath=`.spec.monitor.replicas`
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.spec.vitastorClusterNamespace`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // VitastorCluster is the Schema for the vitastorclusters API
 type VitastorCluster struct {
